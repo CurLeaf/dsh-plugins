@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        env:
+          # 没有安装 DSH 的机器上不需要跑 /rea 的应用补丁
+          DSH_COMMAND_REA_PATCH: '0'
+      - run: pnpm -r test
+        env:
+          DSH_COMMAND_REA_PATCH: '0'

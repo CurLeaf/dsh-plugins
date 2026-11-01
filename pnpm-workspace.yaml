@@ -1,0 +1,5 @@
+packages:
+  - packages/*
+
+# 第三方包的 postinstall 一律不自动执行：这里没有需要编译的原生依赖。
+onlyBuiltDependencies: []

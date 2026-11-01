@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "command": "node",
+      "args": [
+        "/Users/curleaf/Project/erp-admin-demo-1/.cursor/chrome-devtools-mcp.mjs",
+        "--headless",
+        "--userDataDir=/Users/curleaf/Project/erp-admin-demo-1/.local-dev/chrome-profile",
+        "--no-usage-statistics",
+        "--no-performance-crux",
+        "--redact-network-headers",
+        "--viewport=1280x720",
+        "--screenshot-max-width=1280"
+      ]
+    }
+  }
+}

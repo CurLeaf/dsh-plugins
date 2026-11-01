@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "dshVersion": "0.2.1-rc.3",
+  "title": "Third-party command face + composer toggle",
+  "files": [
+    {
+      "id": "commands-register",
+      "package": "@deepseek-ai/dsh-commands",
+      "target": "dsh-commands/lib/index.js",
+      "pre": "dsh-patch/pre/commands-index.js",
+      "patched": "dsh-patch/patched/commands-index.js",
+      "preSha256": "88909a0915e4e3b2148c72a912987c3e29ba025b5dea589a0f4543040dc34750",
+      "patchedSha256": "c3ac1402bd0c17b911d55fd80e8ad736a53f865135d1712d785cba875b6f54fe",
+      "marker": "title must be a non-empty string",
+      "summary": "register() accepts and validates title/icon; the descriptor carries them.",
+      "diff": "dsh-patch/diffs/01-commands-register.patch"
+    },
+    {
+      "id": "wire-host",
+      "package": "@deepseek-ai/dsh-commands",
+      "target": "dsh-commands/lib/typert.host.js",
+      "pre": "dsh-patch/pre/commands-typert.host.js",
+      "patched": "dsh-patch/patched/commands-typert.host.js",
+      "preSha256": "c8359570bb029548e574fa398eb9caad00b80da29f92987cafb1de075c0e10ac",
+      "patchedSha256": "780ea1f177c5a2943ce665c3716c11c030934c401983addd8ca0308e535094c2",
+      "marker": "'title': z.string().readonly().optional()",
+      "summary": "commands/list result schema keeps title/icon on the Host side.",
+      "diff": "dsh-patch/diffs/02-wire-host.patch"
+    },
+    {
+      "id": "wire-client",
+      "package": "@deepseek-ai/dsh-commands",
+      "target": "dsh-commands/lib/typert.remote-client.js",
+      "pre": "dsh-patch/pre/commands-typert.remote-client.js",
+      "patched": "dsh-patch/patched/commands-typert.remote-client.js",
+      "preSha256": "f317056b4e54dcaea1f20f125bb091a60dbf2fb5aa46274bda0d646473d810d6",
+      "patchedSha256": "2003000450440bed809ca713a70e486f2cacb34067f4c728f9b3dc507c48bb90",
+      "marker": "'title': z.string().readonly().optional()",
+      "summary": "commands/list result schema keeps title/icon on the client codec.",
+      "diff": "dsh-patch/diffs/03-wire-client.patch"
+    },
+    {
+      "id": "types-index",
+      "package": "@deepseek-ai/dsh-commands",
+      "target": "dsh-commands/lib/types/index.d.ts",
+      "pre": "dsh-patch/pre/commands-types.d.ts",
+      "patched": "dsh-patch/patched/commands-types.d.ts",
+      "preSha256": "5208f19179bd638f18b99b9386805896e187a0e64c9b7f76accf24d59ed4784c",
+      "patchedSha256": "782f8c1cb6b42cb839597d2a132352f6b22bba72827c0d5fef7dd7b3d1fc6051",
+      "marker": "readonly title?: string;",
+      "summary": "CommandDefinition documents title/icon.",
+      "diff": "dsh-patch/diffs/04-types-index.patch"
+    },
+    {
+      "id": "types-descriptor",
+      "package": "@deepseek-ai/dsh-commands",
+      "target": "dsh-commands/lib/types/types.d.ts",
+      "pre": "dsh-patch/pre/commands-types-inner.d.ts",
+      "patched": "dsh-patch/patched/commands-types-inner.d.ts",
+      "preSha256": "aac98b93d3326f4dbd4e94f87cf3320746916b9f4fbdf8567ac25ff77f73609c",
+      "patchedSha256": "e47824ac4f88749b31b3294c0cd28b00201adf5c428200f923ee3ea676ffc3d9",
+      "marker": "readonly title?: string;",
+      "summary": "CommandDescriptor documents title/icon.",
+      "diff": "dsh-patch/diffs/05-types-descriptor.patch"
+    },
+    {
+      "id": "menu-face",
+      "package": "@deepseek-ai/dsh-client-ui-commands",
+      "target": "dsh-client-ui-commands/lib/client.js",
+      "pre": "dsh-patch/pre/ui-commands-client.js",
+      "patched": "dsh-patch/patched/ui-commands-client.js",
+      "preSha256": "8582c8fa0442f88bc6d28287011ef33032e69a59db461f9f00908c1d63b5bf64",
+      "patchedSha256": "50a701381e366453d96cac429d20506a4257e88a994d757816f0c55a09babd37",
+      "marker": "function declaredRowFace(descriptor)",
+      "summary": "declaredRowFace(): title/icon win, description becomes the title otherwise, generic glyph fallback.",
+      "diff": "dsh-patch/diffs/06-menu-face.patch"
+    },
+    {
+      "id": "toggle",
+      "package": "@deepseek-ai/dsh-client-ui-input-trigger",
+      "target": "dsh-client-ui-input-trigger/lib/client.js",
+      "pre": "dsh-patch/pre/ui-input-trigger-client.js",
+      "patched": "dsh-patch/patched/ui-input-trigger-client.js",
+      "preSha256": "4a9605b0a811354ed49495790b331bf4f5198ff41614920d9d0c488e22a0f2af",
+      "patchedSha256": "2802ff701d23cae29c1010cb8a93a226cc7db9b0422e219da4c2c6152f8a5a5d",
+      "marker": "A draft update that carries no trigger",
+      "summary": "track() keeps the launch mark when the update carries no trigger, so a second press on the trigger closes the menu.",
+      "diff": "dsh-patch/diffs/07-toggle.patch"
+    }
+  ]
+}

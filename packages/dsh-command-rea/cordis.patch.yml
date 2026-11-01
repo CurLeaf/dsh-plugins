@@ -1,0 +1,5 @@
+# Bundle layer of `dsh-command-rea`: one Host row that registers the `/rea`
+# command. Installing the package as a bundle mounts it; no manual profile patch.
+- insert:
+    - id: command-rea
+      name: dsh-command-rea

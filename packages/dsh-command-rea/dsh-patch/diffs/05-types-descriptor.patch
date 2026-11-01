@@ -1,0 +1,13 @@
+--- dsh-commands/lib/types/types.d.ts
++++ dsh-commands/lib/types/types.d.ts (patched)
+@@ -59,6 +59,10 @@
+     readonly name: string;
+     /** Human-readable summary used in discovery UI. */
+     readonly description: string;
++    /** Menu title used instead of the command name; absent falls back to the description. */
++    readonly title?: string;
++    /** Shared primitives icon export name rendered beside the title. */
++    readonly icon?: string;
+     /** Optional free-form input hint advertised to capable clients. */
+     readonly input?: CommandInputDescriptor;
+ }

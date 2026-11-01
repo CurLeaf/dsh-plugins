@@ -1,0 +1,25 @@
+--- dsh-client-ui-input-trigger/lib/client.js
++++ dsh-client-ui-input-trigger/lib/client.js (patched)
+@@ -1038,9 +1038,12 @@
+ 			track(draft, caret, guard, draftRev) {
+ 				if (this.disposed) return;
+ 				const launched = this.launcher.getSnapshot() !== null;
+-				this.clearLauncher();
+ 				const raw = detectTrigger(draft, caret, guard);
+ 				if (raw === null) {
++					/* A draft update that carries no trigger must not drop a launched
++					 * menu's launch mark: focusing the composer to re-press the trigger
++					 * is such an update, and without the mark the next press reads as a
++					 * fresh open instead of a toggle. */
+ 					if (launched) return;
+ 					this.hit = null;
+ 					if (guard.tier !== "frozen") this.dismissed = null;
+@@ -1048,6 +1051,8 @@
+ 					this.reduce({ type: "close" });
+ 					return;
+ 				}
++				/* A typed trigger takes the menu over, so the launch mark retires here. */
++				if (launched) this.clearLauncher();
+ 				const hit = {
+ 					...raw,
+ 					span: {

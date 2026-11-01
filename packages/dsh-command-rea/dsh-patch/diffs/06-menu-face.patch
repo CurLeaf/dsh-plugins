@@ -1,0 +1,48 @@
+--- dsh-client-ui-commands/lib/client.js
++++ dsh-client-ui-commands/lib/client.js (patched)
+@@ -1334,6 +1334,36 @@
+ 				icon: face.icon
+ 			};
+ 		}
++		/** Glyph for a Host command that declares no icon of its own. */
++		const GENERIC_COMMAND_ICON = "IconCordisPluginOutlineRegular";
++		/**
++		* Resolve one icon by its export name in the shared primitives module.
++		* @param name - export name such as `IconSearchOutlineRegular`.
++		* @returns the icon component, or undefined when the module has no such export.
++		*/
++		function iconByName(name) {
++			if (typeof name !== "string") return void 0;
++			const icon = _deepseek_ai_dsh_client_ui_primitives[name];
++			return typeof icon === "function" ? icon : void 0;
++		}
++		/**
++		* The menu face of a Host command this package has no first-party identity
++		* for. The definition's own `title` and `icon` win when it supplies them;
++		* otherwise its catalog description becomes the title, because Host
++		* descriptions are written as one-line summaries already. A description
++		* that only repeats the title is dropped instead of being shown twice.
++		* @param descriptor - effective Host command descriptor.
++		* @returns the row's title, glyph, and description.
++		*/
++		function declaredRowFace(descriptor) {
++			const title = typeof descriptor.title === "string" && descriptor.title.trim() !== "" ? descriptor.title : void 0;
++			const icon = iconByName(descriptor.icon) ?? iconByName(GENERIC_COMMAND_ICON);
++			return {
++				label: title ?? descriptor.description,
++				...icon === void 0 ? {} : { icon },
++				...title === void 0 ? {} : { description: descriptor.description }
++			};
++		}
+ 		/**
+ 		* Arrange the empty-query menu: the Add section, then the Commands section,
+ 		* each in usage order, with unlisted rows closing Commands in their input
+@@ -1537,7 +1567,7 @@
+ 					seen.add(c.name);
+ 					rows.push({
+ 						name: c.name,
+-						...builtinRowFace(c, this.t) ?? { description: c.description },
++						...builtinRowFace(c, this.t) ?? declaredRowFace(c),
+ 						...c.input !== void 0 ? { hint: c.input.hint } : {}
+ 					});
+ 				}

@@ -1,0 +1,3 @@
+- insert:
+    - id: shell-ui
+      name: dsh-shell-ui

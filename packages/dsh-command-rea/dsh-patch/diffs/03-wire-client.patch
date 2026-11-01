@@ -1,0 +1,11 @@
+--- dsh-commands/lib/typert.remote-client.js
++++ dsh-commands/lib/typert.remote-client.js (patched)
+@@ -36,6 +36,8 @@
+   'definitionId': z.string().readonly().optional().describe('Stable plugin-owned identity; absent for definitions without identity-based client behavior.'),
+   'name': z.string().readonly().describe('Lowercase command name without the leading slash.'),
+   'description': z.string().readonly().describe('Human-readable summary used in discovery UI.'),
++  'title': z.string().readonly().optional().describe('Definition-supplied menu title; absent means the client falls back to the description.'),
++  'icon': z.string().readonly().optional().describe('Shared primitives icon export name rendered beside the title.'),
+   'input': z.object({
+   'hint': z.string().readonly().describe('Placeholder shown before the user supplies free-form input.'),
+   'attachments': z.boolean().readonly().optional().describe('Whether composer attachments may accompany an invocation. Absent or false = the executor rejects an invocation carrying attachments and capable composers refuse the submission before dispatch. A declaring command\'s handler receives the admitted durable blocks and owns every further grammar decision, including rejecting sub-commands that cannot use them.'),

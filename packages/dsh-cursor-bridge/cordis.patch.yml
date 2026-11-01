@@ -1,0 +1,3 @@
+- insert:
+    - id: cursor-bridge
+      name: dsh-cursor-bridge

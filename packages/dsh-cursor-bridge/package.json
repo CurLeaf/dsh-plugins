@@ -1,0 +1,52 @@
+{
+  "name": "dsh-cursor-bridge",
+  "version": "0.1.0",
+  "description": "Project-local Cursor skills and commands as DSH skills, so the composer's / menu lists them.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node test/provider.test.mjs && node test/watch.test.mjs",
+    "test:registry": "ELECTRON_RUN_AS_NODE=1 \"/Applications/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness\" test/harness.mjs",
+    "verify:profile": "node test/verify-profile.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "cursor",
+    "skill",
+    "command"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "license": "MIT",
+  "author": "curleaf",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CurLeaf/dsh-plugins.git",
+    "directory": "packages/dsh-cursor-bridge"
+  },
+  "homepage": "https://github.com/CurLeaf/dsh-plugins/tree/main/packages/dsh-cursor-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/CurLeaf/dsh-plugins/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

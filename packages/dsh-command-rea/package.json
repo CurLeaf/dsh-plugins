@@ -1,0 +1,64 @@
+{
+  "name": "dsh-command-rea",
+  "version": "0.3.0",
+  "description": "DSH slash command /rea: hand a reverse-engineering request to the reverse-engineer-anything skill and the REA MCP tools, with a titled and glyphed / menu row",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "lib/",
+    "bin/",
+    "dsh-patch/",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "dsh-command-rea-patch": "bin/dsh-command-rea-patch.js"
+  },
+  "scripts": {
+    "postinstall": "node bin/dsh-command-rea-patch.js --postinstall",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "license": "MIT",
+  "author": "curleaf",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CurLeaf/dsh-plugins.git",
+    "directory": "packages/dsh-command-rea"
+  },
+  "homepage": "https://github.com/CurLeaf/dsh-plugins/tree/main/packages/dsh-command-rea#readme",
+  "bugs": {
+    "url": "https://github.com/CurLeaf/dsh-plugins/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "rea",
+    "slash-command",
+    "reverse-engineering"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-commands"
+      ]
+    }
+  }
+}

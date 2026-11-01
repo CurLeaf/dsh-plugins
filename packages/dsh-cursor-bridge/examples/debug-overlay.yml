@@ -1,0 +1,6 @@
+# 一次性调试覆盖层：让插件在启动时打印宿主侧目录，用于无 GUI 验收。
+- id: cursor-bridge
+  name: dsh-cursor-bridge
+  config:
+    debug: true
+    debugCwd: /Users/curleaf/Project/erp-admin-demo-1

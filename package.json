@@ -1,0 +1,15 @@
+{
+  "name": "dsh-plugins",
+  "private": true,
+  "type": "module",
+  "description": "Curleaf's hand-written DeepSeek Harness plugins, kept in one workspace so they share a build, a test run and a release.",
+  "packageManager": "pnpm@10.0.0",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "test": "pnpm -r test",
+    "release": "node scripts/release.mjs",
+    "release:dry": "node scripts/release.mjs --dry-run"
+  }
+}
