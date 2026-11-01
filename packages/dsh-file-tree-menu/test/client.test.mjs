@@ -39,7 +39,7 @@ async function loadBundle() {
 		globalThis.window = previous
 	}
 	assert.ok(registration, 'the bundle registers itself')
-	assert.equal(registration.id, 'dsh-file-menu')
+	assert.equal(registration.id, 'dsh-file-tree-menu')
 	const module = registration.factory((spec) => {
 		if (spec === 'react') return reactStub
 		if (spec === '@deepseek-ai/dsh-client-ui-primitives') return primitivesStub

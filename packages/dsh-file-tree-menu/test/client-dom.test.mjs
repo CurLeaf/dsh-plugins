@@ -224,7 +224,7 @@ async function choose(id) {
 
 /** Click the last button of an open dialog (the confirming one). */
 async function confirmDialog() {
-	const buttons = [...document.querySelectorAll('.dsh-file-menu-buttons button')]
+	const buttons = [...document.querySelectorAll('.dsh-file-tree-menu-buttons button')]
 	assert.ok(buttons.length >= 2, 'dialog buttons')
 	const confirm = buttons.at(-1)
 	await act(async () => {
@@ -327,7 +327,7 @@ test('重命名 posts one rename and reports the error inline when the Host refu
 
 	await rightClick('/w/a.txt')
 	await choose('rename')
-	const input = document.querySelector('.dsh-file-menu-input')
+	const input = document.querySelector('.dsh-file-tree-menu-input')
 	assert.ok(input, 'rename dialog input')
 	assert.equal(input.value, 'a.txt')
 	assert.match(document.querySelector('[role="dialog"]').textContent, /重命名/)
@@ -336,13 +336,13 @@ test('重命名 posts one rename and reports the error inline when the Host refu
 	hostAnswer = () => ({ status: 409, body: { code: 'exists', message: '已经存在同名文件：b.txt' } })
 	await confirmDialog()
 	assert.deepEqual(requests.at(-1).body, { action: 'rename', path: '/w/a.txt', name: 'b.txt' })
-	assert.match(document.querySelector('.dsh-file-menu-error').textContent, /已经存在同名文件/)
+	assert.match(document.querySelector('.dsh-file-tree-menu-error').textContent, /已经存在同名文件/)
 	assert.ok(document.querySelector('[role="dialog"]'), 'the dialog stays open on failure')
 
 	hostAnswer = (body) => ({ status: 200, body: { ok: true, action: body.action, path: '/w/b.txt' } })
 	await confirmDialog()
 	assert.equal(document.querySelector('[role="dialog"]'), null, 'the dialog closes on success')
-	assert.match(document.querySelector('.dsh-file-menu-toast').textContent, /已重命名为「b.txt」/)
+	assert.match(document.querySelector('.dsh-file-tree-menu-toast').textContent, /已重命名为「b.txt」/)
 	await view.unmount()
 })
 
@@ -362,7 +362,7 @@ test('删除 asks once, then posts the delete and closes', async () => {
 	await confirmDialog()
 	assert.deepEqual(requests.at(-1).body, { action: 'delete', path: '/w/docs' })
 	assert.equal(document.querySelector('[role="dialog"]'), null)
-	assert.match(document.querySelector('.dsh-file-menu-toast').textContent, /已删除「docs」/)
+	assert.match(document.querySelector('.dsh-file-tree-menu-toast').textContent, /已删除「docs」/)
 	await view.unmount()
 })
 
@@ -389,7 +389,7 @@ test('Escape closes the dialog without calling the Host', async () => {
 	requests.length = 0
 	await rightClick('/w/a.txt')
 	await choose('rename')
-	const input = document.querySelector('.dsh-file-menu-input')
+	const input = document.querySelector('.dsh-file-tree-menu-input')
 	await act(async () => {
 		input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
 	})

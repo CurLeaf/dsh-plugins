@@ -8,7 +8,7 @@
 
 | 包 | 做什么 | 在 profile 里的形态 |
 |---|---|---|
-| `dsh-file-menu` | 工作区文件树右键菜单：添加到会话、在访达中显示、复制名/相对路径/绝对路径、重命名、删除（写操作走宿主的鉴权路由） | 1 条 bundle |
+| `dsh-file-tree-menu` | 工作区文件树右键菜单：添加到会话、在访达中显示、复制名/相对路径/绝对路径、重命名、删除（写操作走宿主的鉴权路由） | 1 条 bundle |
 | `dsh-command-rea` | 斜杠命令 `/rea`：把逆向分析请求交给 `reverse-engineer-anything` 技能与 REA MCP，附带钉死 DSH 版本的菜单面孔补丁 | 1 条 bundle |
 | `dsh-cursor-bridge` | 把项目里的 `.cursor/skills`、`.cursor/commands` 投影成 DSH 技能，直接进「/」菜单 | 1 条 bundle |
 | `dsh-shell-ui` | 纯外观层：macOS 式设置面板卡片 + 左栏非导航面板折叠进「更多」 | 1 条 bundle |

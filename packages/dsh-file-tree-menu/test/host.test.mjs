@@ -23,7 +23,7 @@ after(async () => {
 
 /** One writable workspace plus a sibling "outside" directory, both real. */
 async function sandbox() {
-	const base = await mkdtemp(join(tmpdir(), 'dsh-file-menu-'))
+	const base = await mkdtemp(join(tmpdir(), 'dsh-file-tree-menu-'))
 	created.push(base)
 	const root = join(base, 'workspace')
 	const outside = join(base, 'outside')

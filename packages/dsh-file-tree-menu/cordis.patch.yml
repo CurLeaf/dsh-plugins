@@ -1,0 +1,3 @@
+- insert:
+    - id: file-menu
+      name: dsh-file-tree-menu

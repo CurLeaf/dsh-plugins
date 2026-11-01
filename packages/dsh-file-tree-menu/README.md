@@ -1,4 +1,4 @@
-# dsh-file-menu
+# dsh-file-tree-menu
 
 给右侧栏的**工作区文件树**加一个右键菜单：以前右键只能弹出浏览器自带的「Copy」，现在是文件树自己的菜单。
 
@@ -19,7 +19,7 @@
 桌面端 profile（`~/.dsh/profiles/desktop`）：
 
 ```bash
-dsh plugin --profile desktop add link:/Users/curleaf/WorkSpace/dsh-file-menu
+dsh plugin --profile desktop add link:~/WorkSpace/dsh-plugins/packages/dsh-file-tree-menu
 ```
 
 然后**退出并重新打开 DeepSeek Harness**。新插件要重新读一次 profile，窗口刷新（Cmd+R）不够。
@@ -31,7 +31,7 @@ dsh plugin --profile desktop add link:/Users/curleaf/WorkSpace/dsh-file-menu
 ```
 浏览器                                    宿主
 ┌────────────────────────────┐           ┌──────────────────────────────┐
-│ 文件树右键菜单              │           │ POST /dsh-file-menu/action    │
+│ 文件树右键菜单              │           │ POST /dsh-file-tree-menu/action    │
 │ 复制 / @ 引用 / 显示位置    │  ──写──▶  │ 重命名、删除                  │
 │ 重命名、删除（对话框）      │           │ 鉴权、限界、路径校验          │
 └────────────────────────────┘           └──────────────────────────────┘
@@ -71,4 +71,4 @@ npm test
 
 ## 卸载
 
-从 profile 的 `dependencies` 里删掉 `dsh-file-menu`、从 `dsh.profile.bundles` 删掉同名条目，删掉 `node_modules/dsh-file-menu`，重启应用。
+从 profile 的 `dependencies` 里删掉 `dsh-file-tree-menu`、从 `dsh.profile.bundles` 删掉同名条目，删掉 `node_modules/dsh-file-tree-menu`，重启应用。

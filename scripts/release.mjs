@@ -26,7 +26,8 @@ const otp = otpIndex === -1 ? undefined : argv[otpIndex + 1]
 /** 跑一条命令并回传 stdout；失败时回传 undefined（用于探测 npm 状态）。 */
 function tryRun(command, args, options = {}) {
   try {
-    return execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options }).trim()
+    // stdio: 'inherit' 时 execFileSync 回传 null，这里统一当空串处理
+    return (execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...options }) ?? '').trim()
   } catch (error) {
     if (options.rethrow === true) throw error
     return undefined

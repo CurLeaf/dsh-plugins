@@ -12,7 +12,7 @@ importers:
 
   packages/dsh-cursor-bridge: {}
 
-  packages/dsh-file-menu:
+  packages/dsh-file-tree-menu:
     devDependencies:
       jsdom:
         specifier: ^26.1.0

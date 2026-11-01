@@ -1,5 +1,5 @@
 /**
- * Host half of `dsh-file-menu`.
+ * Host half of `dsh-file-tree-menu`.
  *
  * The workspace file tree in the right sidebar is read-only: it lists a
  * Session's workspace through the `workspaceFiles` Remote and opens files into
@@ -25,7 +25,7 @@
  *   - A rename may only change the last path segment, and never overwrites an
  *     existing entry (a case-only rename of the same inode is allowed).
  *
- * @module dsh-file-menu
+ * @module dsh-file-tree-menu
  */
 import { lstat, realpath, rename as renameEntry, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
@@ -34,7 +34,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 export const name = 'file-menu'
 
 /** Route path: one exact POST endpoint. */
-export const ACTION_PATH = '/dsh-file-menu/action'
+export const ACTION_PATH = '/dsh-file-tree-menu/action'
 
 /** Roster of actions this route accepts. */
 const ACTIONS = new Set(['rename', 'delete'])

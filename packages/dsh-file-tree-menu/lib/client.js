@@ -1,5 +1,5 @@
 /**
- * Browser half of `dsh-file-menu`.
+ * Browser half of `dsh-file-tree-menu`.
  *
  * The right sidebar's workspace file tree (`@deepseek-ai/dsh-client-ui-sidebar-files`)
  * owns its rows: it renders `<li data-files-entry data-files-path>` with a plain
@@ -22,7 +22,7 @@
  *   删除              confirm dialog; the Host route deletes under the workspace
  *
  * The two write operations go through the plugin's Host half
- * (`POST /dsh-file-menu/action`), because the tree's `workspaceFiles` Remote is
+ * (`POST /dsh-file-tree-menu/action`), because the tree's `workspaceFiles` Remote is
  * read-only. Every other item works entirely in the browser and keeps working
  * when the Host half is missing.
  *
@@ -31,7 +31,7 @@
  * reimplementation.
  */
 window.__ModuleLoader__.load({
-	id: 'dsh-file-menu',
+	id: 'dsh-file-tree-menu',
 	factory(require) {
 		const React = require('react')
 		const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
@@ -40,7 +40,7 @@ window.__ModuleLoader__.load({
 		const { Menu } = primitives
 
 		/** The Host route the write operations post to (relative: survives a base path). */
-		const ACTION_ROUTE = 'dsh-file-menu/action'
+		const ACTION_ROUTE = 'dsh-file-tree-menu/action'
 
 		/** The slot the files tab publishes for its header: `scope: session`, so `inputActions` arrives. */
 		const ACTIONS_SLOT = 'sidebar.right.tab.files.actions'
@@ -48,7 +48,7 @@ window.__ModuleLoader__.load({
 		/** Marks the hidden span whose closest tree this instance owns. */
 		const BRIDGE_ATTRIBUTE = 'data-file-menu-bridge'
 
-		const STYLE_ID = 'dsh-file-menu/styles'
+		const STYLE_ID = 'dsh-file-tree-menu/styles'
 
 		/** File-manager wording per Host platform. */
 		const MANAGER_LABELS = {
@@ -113,26 +113,26 @@ window.__ModuleLoader__.load({
 				if (document.getElementById(STYLE_ID) !== null) return
 				const tag = document.createElement('style')
 				tag.id = STYLE_ID
-				tag.dataset.plugin = 'dsh-file-menu'
+				tag.dataset.plugin = 'dsh-file-tree-menu'
 				tag.textContent = [
-					'.dsh-file-menu-list{min-width:184px}',
-					'.dsh-file-menu-overlay{position:fixed;inset:0;z-index:1200;display:flex;align-items:flex-start;justify-content:center;padding-top:16vh;background:rgba(0,0,0,.28)}',
-					'.dsh-file-menu-dialog{box-sizing:border-box;width:min(440px,calc(100vw - 48px));padding:16px 18px;border-radius:var(--dsw-radius-lg,12px);border:.5px solid var(--dsw-alias-border-l3,rgba(255,255,255,.14));background:var(--dsw-alias-bg-layer-1,#2b2b2b);color:var(--dsw-alias-label-primary,#ededed);box-shadow:0 16px 48px rgba(0,0,0,.42);font-size:13px;line-height:1.55}',
-					'.dsh-file-menu-title{margin:0 0 10px;font-size:14px;font-weight:600}',
-					'.dsh-file-menu-text{margin:0;color:var(--dsw-alias-label-secondary,#b8b8b8);word-break:break-all}',
-					'.dsh-file-menu-text strong{color:var(--dsw-alias-label-primary,#ededed);font-weight:600}',
-					'.dsh-file-menu-input{box-sizing:border-box;width:100%;height:32px;margin-top:12px;padding:0 10px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.18));background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.05));color:inherit;font:inherit}',
-					'.dsh-file-menu-input:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#4d6bfe)}',
-					'.dsh-file-menu-error{margin:8px 0 0;color:var(--dsw-alias-danger-primary,#f43146)}',
-					'.dsh-file-menu-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}',
-					'.dsh-file-menu-button{height:28px;padding:0 14px;border-radius:var(--dsw-radius-md,6px);border:.5px solid var(--dsw-alias-border-l3,rgba(255,255,255,.16));background:transparent;color:inherit;font:inherit;cursor:pointer}',
-					'.dsh-file-menu-button:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.16))}',
-					'.dsh-file-menu-button[disabled]{opacity:.55;cursor:default}',
-					'.dsh-file-menu-primary{background:var(--dsw-alias-brand-primary,#4d6bfe);border-color:transparent;color:#fff}',
-					'.dsh-file-menu-primary:hover{filter:brightness(1.06);background:var(--dsw-alias-brand-primary,#4d6bfe)}',
-					'.dsh-file-menu-danger{background:var(--dsw-alias-danger-primary,#f43146);border-color:transparent;color:#fff}',
-					'.dsh-file-menu-danger:hover{filter:brightness(1.06);background:var(--dsw-alias-danger-primary,#f43146)}',
-					'.dsh-file-menu-toast{position:fixed;top:40px;left:50%;z-index:1300;transform:translateX(-50%);width:max-content;max-width:min(560px,calc(100vw - 48px));padding:10px 14px;border-radius:var(--dsw-radius-lg,12px);background:var(--dsw-alias-toast-bg,#2f2f2f);color:var(--dsw-alias-toast-label,#fff);font-size:12.5px;line-height:1.5;text-align:center;box-shadow:0 8px 26px rgba(0,0,0,.3);pointer-events:none}'
+					'.dsh-file-tree-menu-list{min-width:184px}',
+					'.dsh-file-tree-menu-overlay{position:fixed;inset:0;z-index:1200;display:flex;align-items:flex-start;justify-content:center;padding-top:16vh;background:rgba(0,0,0,.28)}',
+					'.dsh-file-tree-menu-dialog{box-sizing:border-box;width:min(440px,calc(100vw - 48px));padding:16px 18px;border-radius:var(--dsw-radius-lg,12px);border:.5px solid var(--dsw-alias-border-l3,rgba(255,255,255,.14));background:var(--dsw-alias-bg-layer-1,#2b2b2b);color:var(--dsw-alias-label-primary,#ededed);box-shadow:0 16px 48px rgba(0,0,0,.42);font-size:13px;line-height:1.55}',
+					'.dsh-file-tree-menu-title{margin:0 0 10px;font-size:14px;font-weight:600}',
+					'.dsh-file-tree-menu-text{margin:0;color:var(--dsw-alias-label-secondary,#b8b8b8);word-break:break-all}',
+					'.dsh-file-tree-menu-text strong{color:var(--dsw-alias-label-primary,#ededed);font-weight:600}',
+					'.dsh-file-tree-menu-input{box-sizing:border-box;width:100%;height:32px;margin-top:12px;padding:0 10px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-l2,rgba(255,255,255,.18));background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.05));color:inherit;font:inherit}',
+					'.dsh-file-tree-menu-input:focus{outline:none;border-color:var(--dsw-alias-brand-primary,#4d6bfe)}',
+					'.dsh-file-tree-menu-error{margin:8px 0 0;color:var(--dsw-alias-danger-primary,#f43146)}',
+					'.dsh-file-tree-menu-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}',
+					'.dsh-file-tree-menu-button{height:28px;padding:0 14px;border-radius:var(--dsw-radius-md,6px);border:.5px solid var(--dsw-alias-border-l3,rgba(255,255,255,.16));background:transparent;color:inherit;font:inherit;cursor:pointer}',
+					'.dsh-file-tree-menu-button:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.16))}',
+					'.dsh-file-tree-menu-button[disabled]{opacity:.55;cursor:default}',
+					'.dsh-file-tree-menu-primary{background:var(--dsw-alias-brand-primary,#4d6bfe);border-color:transparent;color:#fff}',
+					'.dsh-file-tree-menu-primary:hover{filter:brightness(1.06);background:var(--dsw-alias-brand-primary,#4d6bfe)}',
+					'.dsh-file-tree-menu-danger{background:var(--dsw-alias-danger-primary,#f43146);border-color:transparent;color:#fff}',
+					'.dsh-file-tree-menu-danger:hover{filter:brightness(1.06);background:var(--dsw-alias-danger-primary,#f43146)}',
+					'.dsh-file-tree-menu-toast{position:fixed;top:40px;left:50%;z-index:1300;transform:translateX(-50%);width:max-content;max-width:min(560px,calc(100vw - 48px));padding:10px 14px;border-radius:var(--dsw-radius-lg,12px);background:var(--dsw-alias-toast-bg,#2f2f2f);color:var(--dsw-alias-toast-label,#fff);font-size:12.5px;line-height:1.5;text-align:center;box-shadow:0 8px 26px rgba(0,0,0,.3);pointer-events:none}'
 				].join('')
 				document.head.appendChild(tag)
 			} catch (error) {
@@ -147,7 +147,7 @@ window.__ModuleLoader__.load({
 				if (typeof document === 'undefined' || document.body === null) return
 				if (toastElement === undefined || toastElement.isConnected !== true) {
 					toastElement = document.createElement('div')
-					toastElement.className = 'dsh-file-menu-toast'
+					toastElement.className = 'dsh-file-tree-menu-toast'
 					toastElement.setAttribute('role', 'status')
 					document.body.appendChild(toastElement)
 				}
@@ -590,7 +590,7 @@ window.__ModuleLoader__.load({
 							autoFocus: true,
 							align: 'start',
 							side: 'bottom',
-							listClassName: 'dsh-file-menu-list',
+							listClassName: 'dsh-file-tree-menu-list',
 							getAnchorRect: () => ({ left: menu.x, top: menu.y, right: menu.x, bottom: menu.y, width: 0, height: 0 }),
 							onClose: closeMenu,
 							items,
@@ -600,16 +600,16 @@ window.__ModuleLoader__.load({
 				dialog !== null
 					? h(
 							'div',
-							{ className: 'dsh-file-menu-overlay', onPointerDown: overlayPointer, onKeyDown: overlayKeys },
+							{ className: 'dsh-file-tree-menu-overlay', onPointerDown: overlayPointer, onKeyDown: overlayKeys },
 							h(
 								'div',
-								{ className: 'dsh-file-menu-dialog', role: 'dialog', 'aria-modal': 'true' },
-								h('p', { className: 'dsh-file-menu-title' }, dialog.kind === 'rename' ? '重命名' : '删除'),
+								{ className: 'dsh-file-tree-menu-dialog', role: 'dialog', 'aria-modal': 'true' },
+								h('p', { className: 'dsh-file-tree-menu-title' }, dialog.kind === 'rename' ? '重命名' : '删除'),
 								dialog.kind === 'rename'
-									? h('p', { className: 'dsh-file-menu-text' }, '修改 ', h('strong', null, dialog.target.name), ' 的名称：')
+									? h('p', { className: 'dsh-file-tree-menu-text' }, '修改 ', h('strong', null, dialog.target.name), ' 的名称：')
 									: h(
 											'p',
-											{ className: 'dsh-file-menu-text' },
+											{ className: 'dsh-file-tree-menu-text' },
 											'确定删除 ',
 											h('strong', null, dialog.target.name),
 											dialog.target.kind === 'directory' ? ' 及其全部内容吗？' : ' 吗？',
@@ -619,7 +619,7 @@ window.__ModuleLoader__.load({
 								dialog.kind === 'rename'
 									? h('input', {
 											ref: inputRef,
-											className: 'dsh-file-menu-input',
+											className: 'dsh-file-tree-menu-input',
 											value: dialog.value,
 											spellCheck: false,
 											autoComplete: 'off',
@@ -633,15 +633,15 @@ window.__ModuleLoader__.load({
 											}
 										})
 									: null,
-								dialog.error !== undefined ? h('p', { className: 'dsh-file-menu-error' }, dialog.error) : null,
+								dialog.error !== undefined ? h('p', { className: 'dsh-file-tree-menu-error' }, dialog.error) : null,
 								h(
 									'div',
-									{ className: 'dsh-file-menu-buttons' },
+									{ className: 'dsh-file-tree-menu-buttons' },
 									h(
 										'button',
 										{
 											type: 'button',
-											className: 'dsh-file-menu-button',
+											className: 'dsh-file-tree-menu-button',
 											disabled: dialog.busy === true,
 											onClick: closeDialog
 										},
@@ -652,8 +652,8 @@ window.__ModuleLoader__.load({
 										{
 											type: 'button',
 											className:
-												'dsh-file-menu-button ' +
-												(dialog.kind === 'rename' ? 'dsh-file-menu-primary' : 'dsh-file-menu-danger'),
+												'dsh-file-tree-menu-button ' +
+												(dialog.kind === 'rename' ? 'dsh-file-tree-menu-primary' : 'dsh-file-tree-menu-danger'),
 											disabled: dialog.busy === true,
 											autoFocus: dialog.kind === 'delete',
 											onClick: submitDialog

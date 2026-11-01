@@ -1,5 +1,5 @@
 {
-  "name": "dsh-file-menu",
+  "name": "dsh-file-tree-menu",
   "version": "0.1.0",
   "description": "Right-click menu for the workspace file tree: add to the conversation, reveal in the file manager, copy the name / relative path / absolute path, rename, and delete.",
   "type": "module",
@@ -44,9 +44,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/CurLeaf/dsh-plugins.git",
-    "directory": "packages/dsh-file-menu"
+    "directory": "packages/dsh-file-tree-menu"
   },
-  "homepage": "https://github.com/CurLeaf/dsh-plugins/tree/main/packages/dsh-file-menu#readme",
+  "homepage": "https://github.com/CurLeaf/dsh-plugins/tree/main/packages/dsh-file-tree-menu#readme",
   "bugs": {
     "url": "https://github.com/CurLeaf/dsh-plugins/issues"
   },
