@@ -21,7 +21,7 @@
 dsh plugin --profile desktop install --offline
 
 # 2. 在 profile 的 package.json 里登记
-#    "dependencies": { "dsh-cursor-bridge": "link:/Users/curleaf/WorkSpace/dsh-cursor-bridge" }
+#    "dependencies": { "dsh-cursor-bridge": "link:~/WorkSpace/dsh-plugins/packages/dsh-cursor-bridge" }
 #    "dsh": { "profile": { "bundles": [ ..., "dsh-cursor-bridge" ] } }
 
 # 3. 重启应用（cordis 不监听配置文件，插件在 boot 时装载）

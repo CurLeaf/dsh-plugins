@@ -113,7 +113,7 @@ localized copy and glyphs do not move.
 ```bash
 # installed from the registry: the postinstall hook already ran it
 # linked checkout (npm/pnpm do not run lifecycle scripts for link: deps):
-node ~/WorkSpace/dsh-command-rea/bin/dsh-command-rea-patch.js
+node ~/WorkSpace/dsh-plugins/packages/dsh-command-rea/bin/dsh-command-rea-patch.js
 
 # or, once the profile has the bin link:
 ~/.dsh/profiles/web/node_modules/.bin/dsh-command-rea-patch --check
