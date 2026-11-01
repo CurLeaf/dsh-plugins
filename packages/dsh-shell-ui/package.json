@@ -53,7 +53,7 @@
     "sidebar"
   ],
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test test/*.test.mjs"
   },
   "devDependencies": {
     "jsdom": "^26.1.0"

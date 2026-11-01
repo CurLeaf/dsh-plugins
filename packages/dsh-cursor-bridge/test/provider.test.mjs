@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 
 import { CursorBridgeProvider, normalizeConfig, parseFrontmatter } from '../lib/index.js'
 
@@ -24,7 +25,9 @@ function makeProvider(overrides = {}) {
 	return new CursorBridgeProvider(undefined, control, config)
 }
 
-test('discovers the real repo: 4 skills + 15 commands', async () => {
+const hasRealRepo = existsSync(REPO)
+
+test('discovers the real repo: 4 skills + 15 commands', { skip: hasRealRepo ? false : '本机没有 ' + REPO }, async () => {
 	const provider = makeProvider()
 	const candidates = await provider.list({ cwd: REPO })
 
@@ -48,7 +51,7 @@ test('discovers the real repo: 4 skills + 15 commands', async () => {
 	assert.ok(commands.includes('prod-server'))
 })
 
-test('every candidate passes the registry contract', async () => {
+test('every candidate passes the registry contract', { skip: hasRealRepo ? false : '本机没有 ' + REPO }, async () => {
 	const provider = makeProvider()
 	const candidates = await provider.list({ cwd: REPO })
 	assert.ok(candidates.length > 0)
@@ -68,7 +71,7 @@ test('every candidate passes the registry contract', async () => {
 	}
 })
 
-test('loads bodies, and the definition name matches the candidate', async () => {
+test('loads bodies, and the definition name matches the candidate', { skip: hasRealRepo ? false : '本机没有 ' + REPO }, async () => {
 	const provider = makeProvider()
 	const candidates = await provider.list({ cwd: REPO })
 	for (const candidate of candidates) {
@@ -81,7 +84,7 @@ test('loads bodies, and the definition name matches the candidate', async () => 
 	}
 })
 
-test('a command body keeps its content and is model-invocable by default', async () => {
+test('a command body keeps its content and is model-invocable by default', { skip: hasRealRepo ? false : '本机没有 ' + REPO }, async () => {
 	const provider = makeProvider()
 	const candidates = await provider.list({ cwd: REPO })
 	const integration = candidates.find((entry) => entry.name === 'platform-integration')
@@ -92,7 +95,7 @@ test('a command body keeps its content and is model-invocable by default', async
 	assert.doesNotMatch(definition.content, /^---/)
 })
 
-test('commandModelInvocable:false keeps commands user-only', async () => {
+test('commandModelInvocable:false keeps commands user-only', { skip: hasRealRepo ? false : '本机没有 ' + REPO }, async () => {
 	const provider = makeProvider({ commandModelInvocable: false })
 	const candidates = await provider.list({ cwd: REPO })
 	const commands = candidates.filter((entry) => entry.locator.kind === 'command')
@@ -103,7 +106,7 @@ test('commandModelInvocable:false keeps commands user-only', async () => {
 	}
 })
 
-test('project root wins over cwd when a nested directory is used', async () => {
+test('project root wins over cwd when a nested directory is used', { skip: hasRealRepo ? false : '本机没有 ' + REPO }, async () => {
 	const provider = makeProvider()
 	const nested = join(REPO, 'apps')
 	const candidates = await provider.list({ cwd: nested })
