@@ -1,6 +1,6 @@
 {
   "name": "dsh-command-rea",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "DSH slash command /rea: hand a reverse-engineering request to the reverse-engineer-anything skill and the REA MCP tools, with a titled and glyphed / menu row",
   "type": "module",
   "main": "index.js",
