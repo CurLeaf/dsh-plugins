@@ -7,7 +7,7 @@
  */
 
 /** Bundle id used by the profile patch entry. */
-export const name = 'dsh-shell-ui'
+export const name = 'shell-ui'
 
 /** No Host behaviour. */
 export function apply() {}
