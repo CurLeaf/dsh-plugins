@@ -1,7 +1,7 @@
 {
   "name": "dsh-restart-button",
   "version": "0.1.0",
-  "description": "A restart button for the DSH shell: one authenticated Host route that restarts the dsh-web service, and one sidebar footer action shown in both the desktop sidebar and the mobile drawer.",
+  "description": "A restart button inside the DSH account row (desktop sidebar and mobile drawer): one authenticated Host route restarts the dsh-web service, the browser half attaches a two-step confirm button to the avatar row.",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
@@ -54,5 +54,8 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
   }
 }

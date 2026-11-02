@@ -1,160 +1,223 @@
 /**
- * 浏览器半边的契约测试。
+ * 浏览器半边的 DOM 契约测试。
  *
- * 客户端文件只做两件「不跑界面也能断言」的事：把插件交给 loader，把动作注册进
- * `sidebar.footer.action`。这里用桩 loader + 桩 React 驱动同一入口，确认：
+ * 客户端不再注册槽位，而是把按钮挂进侧栏最下面那一行（账号 / 头像行）：
  *
- *   - 注册名、id、顺序（桌面与手机抽屉用的是同一个槽位，注册一次两边都有）；
- *   - 组件是函数，且 `wide=false`（折叠导轨）时仍能渲染出按钮；
- *   - 样式表只装一次、卸载时移除；
- *   - 请求路径是相对路径（转发到子路径部署时不逃出前缀）。
+ *   [data-slot="sidebar.settings"] > 行容器 > 那个 aria-label="账号菜单" 的按钮
+ *
+ * 这些测试用 jsdom 搭出宿主那一行的最小结构，驱动同一个 bundle 入口，确认：
+ *
+ *   - 按钮挂在账号行里（不是另一行），带 aria-label 与自己的样式表；
+ *   - 第一下是「确认重启？」，4 秒逻辑由 blur / 超时收回（这里用 blur 驱动）；
+ *   - 侧栏折叠（data-collapsed="true"）时隐藏，展开后再出现；
+ *   - React 把行重建掉以后，MutationObserver 会把按钮挂回新行；
+ *   - 第二下真的 POST 到 `api/restart-button/restart`；
+ *   - 卸载时按钮、样式、监听全部撤干净。
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import vm from 'node:vm'
+
+import { JSDOM } from 'jsdom'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const CLIENT_PATH = join(here, '..', 'lib', 'client.js')
+const SOURCE = readFileSync(CLIENT_PATH, 'utf8')
 
-/** 最小 React 桩：只建元素，不渲染。 */
-function stubReact() {
-  const createElement = (type, props, ...children) => ({ type, props: props ?? {}, children })
-  return {
-    createElement,
-    Fragment: Symbol('Fragment'),
-    useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
-    useEffect: () => {},
-    useRef: (initial) => ({ current: initial }),
-    useCallback: (fn) => fn,
-  }
+/** 宿主那一行的最小结构：槽位 → 行容器 → 账号按钮。 */
+function accountRowHtml({ collapsed = 'false' } = {}) {
+  return `<!doctype html><html><head></head><body>
+    <div class="sidebar">
+      <div data-slot="sidebar.settings" style="display: contents;">
+        <div class="triggerRow" style="position: relative;">
+          <div data-slot="settings.launcher" style="display: contents;">
+            <button type="button" class="account" data-collapsed="${collapsed}" aria-label="账号菜单">
+              <span>CurLeaf</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body></html>`
+}
+
+/** 等一帧，让 MutationObserver + requestAnimationFrame 跑完。 */
+function flush(ms = 60) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**
- * 用桩环境加载客户端 bundle。
- * @returns {{plugin: object, registrations: object[], styles: object[], cleanup: Function[]}}
+ * 在 jsdom 里加载 bundle 并调用 apply。
+ * @param {object} [options]
+ * @param {string} [options.collapsed] 账号按钮的 data-collapsed。
+ * @param {(url: string, init: object) => Promise<any>} [options.fetchImpl] fetch 桩。
  */
-function loadClient() {
-  const registrations = []
-  const styles = []
-  const cleanups = []
-  let plugin
+function mount({ collapsed = 'false', fetchImpl } = {}) {
+  const dom = new JSDOM(accountRowHtml({ collapsed }), {
+    url: 'http://127.0.0.1:3080/',
+    pretendToBeVisual: true,
+    runScripts: 'outside-only',
+  })
+  const { window } = dom
+  const requests = []
 
-  const document = {
-    baseURI: 'http://127.0.0.1:8710/',
-    head: { appendChild: (tag) => styles.push(tag) },
-    body: { appendChild: () => {} },
-    getElementById: (id) => styles.find((tag) => tag.id === id) ?? null,
-    createElement: () => ({
-      id: '',
-      className: '',
-      dataset: {},
-      style: {},
-      textContent: '',
-      append() {},
-      appendChild() {},
-      addEventListener() {},
-      remove() {},
-      querySelectorAll: () => [],
-      setAttribute() {},
-    }),
-    querySelector: () => null,
-  }
-
-  const context = {
-    window: {
-      __ModuleLoader__: {
-        load: (entry) => {
-          assert.equal(entry.id, 'dsh-restart-button')
-          plugin = entry.factory((name) => {
-            if (name === 'react') return stubReact()
-            throw new Error(`unexpected require: ${name}`)
-          })
-        },
+  window.fetch = async (url, init) => {
+    requests.push({ url: String(url), init })
+    if (fetchImpl) return fetchImpl(String(url), init ?? {})
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { ok: true, pid: 1, plan: { kind: 'systemd', label: 'systemd · dsh-web.service' } }
       },
-      location: { reload: () => {} },
-      matchMedia: () => ({ matches: false, addEventListener: () => {} }),
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    },
-    document,
-    navigator: { platform: 'Linux', userAgent: 'node' },
-    console,
-    setTimeout,
-    clearTimeout,
-    fetch: async () => {
-      throw new Error('no host in this test')
-    },
-    URL,
+    }
   }
 
-  vm.runInNewContext(readFileSync(CLIENT_PATH, 'utf8'), context, { filename: CLIENT_PATH })
+  let plugin
+  window.__ModuleLoader__ = {
+    load: (entry) => {
+      plugin = entry.factory(() => {
+        throw new Error('this bundle requires no modules')
+      })
+    },
+  }
+
+  window.eval(SOURCE)
   assert.ok(plugin !== undefined, 'bundle 没有交回 plugin')
 
+  const disposers = []
   const ctx = {
     effect: (factory) => {
       const dispose = factory()
-      if (typeof dispose === 'function') cleanups.push(dispose)
-    },
-    slots: {
-      inject: (_name, factory) => factory(),
-      register: (options, component) => {
-        registrations.push({ options, component })
-        return () => {}
-      },
+      if (typeof dispose === 'function') disposers.push(dispose)
     },
   }
   plugin.apply(ctx)
-  return { plugin, registrations, styles, cleanups }
+
+  return {
+    dom,
+    window,
+    document: window.document,
+    plugin,
+    requests,
+    button: () => window.document.querySelector('.dsh-restart-inline'),
+    row: () => window.document.querySelector('[data-slot="sidebar.settings"] > *'),
+    dispose: () => {
+      for (const dispose of disposers.reverse()) dispose()
+    },
+  }
 }
 
-test('注入的服务与宿主约定一致', () => {
-  const { plugin } = loadClient()
-  assert.equal(plugin.name, 'restart-button')
-  assert.deepEqual(JSON.parse(JSON.stringify(plugin.inject)), ['slots'])
+test('bundle 的 id / name / inject 与宿主约定一致', () => {
+  const world = mount()
+  assert.equal(world.plugin.name, 'restart-button')
+  assert.deepEqual(JSON.parse(JSON.stringify(world.plugin.inject)), [])
+  assert.equal(world.plugin.inject.length, 0, '纯 DOM 插件不需要宿主服务')
+  world.dispose()
+  world.dom.window.close()
 })
 
-test('注册进侧栏脚部的动作槽位，桌面与抽屉共用', () => {
-  const { registrations } = loadClient()
-  assert.equal(registrations.length, 1)
-  const [entry] = registrations
-  assert.equal(entry.options.name, 'sidebar.footer.action')
-  assert.equal(entry.options.id, 'restart-button')
-  assert.equal(entry.options.order, 30)
-  assert.equal(entry.options.label, '重启 DSH')
-  assert.equal(typeof entry.component, 'function')
+test('按钮挂在账号行里，而不是单独一行', async () => {
+  const world = mount()
+  await flush()
+
+  const button = world.button()
+  assert.ok(button !== null, '没有渲染出重启按钮')
+  assert.equal(button.parentElement, world.row(), '按钮必须是账号行的子节点')
+  assert.equal(button.getAttribute('data-dsh-restart'), 'true')
+  assert.equal(button.getAttribute('aria-label'), '重启 DSH')
+  assert.equal(button.hidden, false)
+  assert.ok(world.document.getElementById('dsh-restart-button/styles') !== null, '样式表没装上')
+
+  world.dispose()
+  world.dom.window.close()
 })
 
-test('折叠导轨（wide=false）也渲染按钮，文字标签保留在 aria 里', () => {
-  const { registrations } = loadClient()
-  const [entry] = registrations
-  const element = entry.component({ wide: false })
-  assert.equal(element.type, 'button')
-  assert.equal(element.props['data-wide'], 'false')
-  assert.equal(element.props['data-dsh-restart'], 'true')
-  assert.equal(element.props['aria-label'], '重启 DSH')
-  assert.equal(element.props.disabled, false)
+test('第一下进入确认态，blur 收回', async () => {
+  const world = mount()
+  await flush()
+  const button = world.button()
+
+  button.click()
+  assert.equal(button.dataset.armed, 'true')
+  assert.equal(button.getAttribute('aria-label'), '确认重启 DSH')
+  assert.equal(button.textContent, '确认重启？')
+  assert.equal(world.requests.length, 0, '第一下不应该发请求')
+
+  button.dispatchEvent(new world.window.Event('blur'))
+  assert.equal(button.dataset.armed, 'false')
+  assert.equal(world.requests.length, 0)
+
+  world.dispose()
+  world.dom.window.close()
 })
 
-test('样式表只装一次，卸载时移除', () => {
-  const { styles, cleanups } = loadClient()
-  assert.equal(styles.length, 1)
-  assert.equal(styles[0].id, 'dsh-restart-button/styles')
-  assert.ok(styles[0].textContent.includes('.dsh-restart-row'))
-  assert.equal(cleanups.length >= 1, true)
-  let removed = false
-  styles[0].remove = () => {
-    removed = true
-  }
-  for (const dispose of cleanups) dispose()
-  assert.equal(removed, true)
+test('侧栏折叠时隐藏，展开后回到账号行', async () => {
+  const world = mount()
+  await flush()
+  const trigger = world.document.querySelector('button[data-collapsed]')
+
+  trigger.setAttribute('data-collapsed', 'true')
+  await flush(80)
+  assert.equal(world.button().hidden, true, '折叠导轨里不该显示')
+
+  trigger.setAttribute('data-collapsed', 'false')
+  await flush(80)
+  assert.equal(world.button().hidden, false, '展开后应该回来')
+
+  world.dispose()
+  world.dom.window.close()
 })
 
-test('请求走相对路径，转发部署下不会逃出前缀', () => {
-  const source = readFileSync(CLIENT_PATH, 'utf8')
-  assert.ok(source.includes("'api/restart-button/status'"))
-  assert.ok(source.includes("'api/restart-button/restart'"))
-  assert.equal(source.includes("'/api/restart-button"), false, '客户端不能用根绝对路径')
+test('React 重建账号行后，按钮挂回新行', async () => {
+  const world = mount()
+  await flush()
+
+  const slot = world.document.querySelector('[data-slot="sidebar.settings"]')
+  const replacement = world.document.createElement('div')
+  replacement.className = 'triggerRow'
+  replacement.innerHTML = '<button type="button" data-collapsed="false" aria-label="账号菜单">CurLeaf</button>'
+  slot.replaceChildren(replacement)
+  await flush(80)
+
+  const button = world.button()
+  assert.ok(button !== null, '按钮被删掉后没有恢复')
+  assert.equal(button.parentElement, replacement)
+
+  world.dispose()
+  world.dom.window.close()
+})
+
+test('第二下发 POST 到重启路由', async () => {
+  const world = mount()
+  await flush()
+  const button = world.button()
+
+  button.click()
+  button.click()
+  await flush(60)
+
+  const post = world.requests.find((entry) => entry.url === 'api/restart-button/restart')
+  assert.ok(post !== undefined, '没有发出重启请求')
+  assert.equal(post.init.method, 'POST')
+  assert.equal(button.dataset.busy, 'true')
+
+  world.dispose()
+  await flush(20)
+  world.dom.window.close()
+})
+
+test('卸载后按钮、样式、监听都撤掉', async () => {
+  const world = mount()
+  await flush()
+  assert.ok(world.button() !== null)
+
+  world.dispose()
+  await flush(30)
+  assert.equal(world.document.querySelector('.dsh-restart-inline'), null)
+  assert.equal(world.document.getElementById('dsh-restart-button/styles'), null)
+
+  world.dom.window.close()
 })
