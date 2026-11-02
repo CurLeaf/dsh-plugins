@@ -12,8 +12,14 @@
 | `dsh-command-rea` | 斜杠命令 `/rea`：把逆向分析请求交给 `reverse-engineer-anything` 技能与 REA MCP，附带钉死 DSH 版本的菜单面孔补丁 | 1 条 bundle |
 | `dsh-cursor-bridge` | 把项目里的 `.cursor/skills`、`.cursor/commands` 投影成 DSH 技能，直接进「/」菜单 | 1 条 bundle |
 | `dsh-shell-ui` | 纯外观层：macOS 式设置面板卡片 + 左栏非导航面板折叠进「更多」 | 1 条 bundle |
+| `dsh-git-panel` | 右侧栏 Git 分区：改动分组、提交框、暂存/丢弃、改动预览标签页、提交分支图（按本机 Cursor 的 Git 模块对齐） | 1 条 bundle |
+| `dsh-restart-button` | 侧栏脚部（手机抽屉的头像行上方）一行「重启 DSH」：两段式确认、自动等进程回来并刷新；宿主侧从 cgroup 认 systemd 单元 | 1 条 bundle |
 
 `dsh-shell-ui` 是合并出来的：原来的 `dsh-settings-apple` 与 `dsh-sidebar-fold` 两半外观合成一个包，少一条 bundle、也少一份要同步的配置。
+
+`dsh-git-panel` 的 Host 半只跑 git（一个鉴权路由），浏览器半只渲染，所以它和本机 Cursor 的 Git 面板可以对得上，而不需要把 Cursor 的任何东西搬进来。
+
+`dsh-restart-button` 同理：浏览器半只发一个请求，重启由宿主按 `systemd → 自定义命令 → 退出进程` 的顺序挑一条路，页面靠 `pid` 变化判断服务已经回来。
 
 ## 不在这里的插件
 

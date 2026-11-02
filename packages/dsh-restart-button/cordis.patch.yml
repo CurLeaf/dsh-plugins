@@ -1,0 +1,5 @@
+# Bundle layer of `dsh-restart-button`: one Host/Client row. Installing the
+# package as a bundle mounts it; no manual profile patch.
+- insert:
+    - id: restart-button
+      name: dsh-restart-button
