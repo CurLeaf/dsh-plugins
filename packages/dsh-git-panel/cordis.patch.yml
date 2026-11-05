@@ -1,0 +1,5 @@
+# Bundle layer of `dsh-git-panel`: one Host/Client row. Installing the package as
+# a bundle mounts it; no manual profile patch.
+- insert:
+    - id: git-panel
+      name: '@qzsy/dsh-git-panel'
