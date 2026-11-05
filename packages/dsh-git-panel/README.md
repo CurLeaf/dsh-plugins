@@ -25,6 +25,11 @@ lib/client.js   浏览器半：两个标签页类型 + 面板与预览页
 test/           host 侧真仓库行为测试 + client 侧注册契约测试
 ```
 
+**改包名时必须同时改两处**：`cordis.patch.yml` 的 `insert[].name`，以及 `lib/client.js` 里
+`window.__ModuleLoader__.load({ id })` 的 `id`。web loader 按包名去抓脚本，脚本注册的名字和包名
+不一致会被判成「loaded without registering」，那是整页插件加载失败（白屏），不是只掉一个分区。
+`test/client.test.mjs` 现在直接拿 `package.json` 的 `name` 断言这个 id，改名漏了会先在这里红。
+
 Host 半只做 git：读（`status` / `graph` / `diff` / `commitDetail` / `branches`）与写（`stage` / `unstage` / `discard` / `commit` / `undoCommit` / `network` / `checkout` / `stash`）。浏览器半只渲染和调它。
 
 安全边界都在 Host 半：

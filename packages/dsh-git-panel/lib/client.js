@@ -16,7 +16,7 @@
  * same previewer any other file link uses.
  */
 window.__ModuleLoader__.load({
-	id: 'dsh-git-panel',
+	id: '@qzsy/dsh-git-panel',
 	factory(require) {
 		const React = require('react')
 		const h = React.createElement

@@ -19,6 +19,13 @@ import vm from 'node:vm'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const CLIENT_PATH = join(here, '..', 'lib', 'client.js')
+/**
+ * The bundle's registered identity must equal the package name: the web loader
+ * fetches a plugin's script by that name and refuses a script that registers
+ * anything else ("loaded without registering ..."), which stalls the whole boot.
+ * Reading it here keeps a rename from drifting out of the client again.
+ */
+const MANIFEST = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'))
 
 /** Minimal React stand-in: the module only builds elements, never renders them. */
 function stubReact() {
@@ -46,7 +53,7 @@ function loadClient() {
 		window: {
 			__ModuleLoader__: {
 				load: (entry) => {
-					assert.equal(entry.id, 'dsh-git-panel')
+					assert.equal(entry.id, MANIFEST.name, 'the client module id must equal the package name')
 					plugin = entry.factory((name) => {
 						if (name === 'react') return stubReact()
 						throw new Error(`unexpected require: ${name}`)
