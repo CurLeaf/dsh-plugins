@@ -1,6 +1,6 @@
 {
   "name": "@qzsy/dsh-git-panel",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A Git section for the right Sidebar: workspace changes, a commit box, stage/discard, a diff preview tab, and a commit graph — modelled on the Git module of the local Cursor IDE.",
   "type": "module",
   "main": "./lib/index.js",

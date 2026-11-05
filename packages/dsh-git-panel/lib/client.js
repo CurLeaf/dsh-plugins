@@ -123,6 +123,7 @@ window.__ModuleLoader__.load({
 			'branch.behind': '落后 {count}',
 			'branch.switch': '切换分支',
 			'branch.current': '当前分支',
+			'branch.local': '本地分支',
 			'status.refresh': '刷新',
 			'status.fetch': '抓取',
 			'status.pull': '拉取',
@@ -159,7 +160,7 @@ window.__ModuleLoader__.load({
 			'confirm.discard': '丢弃',
 			'confirm.cancel': '取消',
 			'discard.done': '已丢弃 {count} 个文件的改动',
-			'commit.placeholder': '提交信息（{mod}+↵ 提交到 “{branch}”）',
+			'commit.placeholder': '提交信息（{mod}+↵ 提交）',
 			'commit.draft': '按当前改动生成提交信息草稿',
 			'commit.draft.one': '更新 {name}',
 			'commit.draft.many': '更新 {name} 等 {count} 个文件',
@@ -235,6 +236,7 @@ window.__ModuleLoader__.load({
 			'branch.behind': '{count} behind',
 			'branch.switch': 'Switch branch',
 			'branch.current': 'Current branch',
+			'branch.local': 'Local branches',
 			'status.refresh': 'Refresh',
 			'status.fetch': 'Fetch',
 			'status.pull': 'Pull',
@@ -271,7 +273,7 @@ window.__ModuleLoader__.load({
 			'confirm.discard': 'Discard',
 			'confirm.cancel': 'Cancel',
 			'discard.done': 'Discarded changes in {count} files',
-			'commit.placeholder': 'Message ({mod}+↵ to commit on "{branch}")',
+			'commit.placeholder': 'Message ({mod}+↵ to commit)',
 			'commit.draft': 'Draft a commit message from the changes',
 			'commit.draft.one': 'Update {name}',
 			'commit.draft.many': 'Update {name} and {count} more files',
@@ -325,181 +327,302 @@ window.__ModuleLoader__.load({
 		/* ------------------------------------------------------------------ */
 
 		const CSS = `
-/* Apple-flavoured design tokens, scoped to the panel. */
+/* ---------------------------------------------------------------------------
+   A Git pane in the Apple surface language, laid out like the Source Control
+   Graph: one header row per pane, a compact list, lane artwork on the left.
+
+   Colour comes from the host app's semantic tokens, so the panel follows the
+   app's light and dark themes; the value after each comma is the dark-theme
+   fallback used when the panel renders outside the app shell.
+   --------------------------------------------------------------------------- */
 .gp-root{
   --gp-font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
   --gp-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
-  --gp-label:rgba(255,255,255,.92);
-  --gp-label-2:rgba(235,235,245,.62);
-  --gp-label-3:rgba(235,235,245,.38);
-  --gp-label-4:rgba(235,235,245,.20);
-  --gp-fill-2:rgba(120,120,128,.28);
-  --gp-fill-3:rgba(120,120,128,.20);
-  --gp-fill-4:rgba(120,120,128,.12);
-  --gp-separator:rgba(84,84,88,.62);
-  --gp-accent:#80a1c0;
-  --gp-accent-hover:#8db0cf;
-  --gp-accent-dim:#3a4552;
-  --gp-accent-ink:#101720;
-  --gp-red:#ff453a;
-  --gp-green:#30d158;
-  --gp-orange:#ff9f0a;
-  --gp-yellow:#ffd60a;
-  --gp-blue:#0a84ff;
-  --gp-purple:#bf5af2;
-  --gp-radius:8px;
+
+  --gp-bg:var(--dsw-alias-bg-base,#151517);
+  --gp-surface:var(--dsw-alias-bg-layer-1,#1b1b1d);
+  --gp-surface-2:var(--dsw-alias-bg-layer-2,#202023);
+  --gp-surface-3:var(--dsw-alias-bg-layer-3,#26262a);
+  --gp-label:var(--dsw-alias-label-primary,#f5f5f7);
+  --gp-label-2:var(--dsw-alias-label-secondary,#c7c7cc);
+  --gp-label-3:var(--dsw-alias-label-tertiary,#8e8e93);
+  --gp-label-4:var(--dsw-alias-label-caption,#5f5f66);
+  --gp-separator:var(--dsw-alias-border-l2,rgba(255,255,255,.12));
+  --gp-hairline:var(--dsw-alias-border-l1,rgba(255,255,255,.07));
+  --gp-hover:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.07));
+  --gp-press:var(--dsw-alias-interactive-bg-active,rgba(255,255,255,.12));
+
+  --gp-green:var(--dsw-alias-state-success-primary,#30d158);
+  --gp-red:var(--dsw-alias-state-error-primary,#ff453a);
+  --gp-orange:#b26a00;
+  --gp-purple:#8b3fd1;
+  --gp-blue:#1f6feb;
+  --gp-code-add:var(--dsw-alias-code-diff-added,rgba(48,209,88,.14));
+  --gp-code-del:var(--dsw-alias-code-diff-deleted,rgba(255,69,58,.15));
+
+  --gp-file-code:#a87c1f;
+  --gp-file-data:#7a5cc4;
+  --gp-file-style:#1c7fa8;
+  --gp-file-doc:#3f74a8;
+  --gp-file-image:#9a55b8;
+  --gp-file-media:#b8457d;
+  --gp-file-font:#8a7420;
+  --gp-file-archive:#6b7079;
+  --gp-file-lock:#6b6c73;
+  --gp-file-shell:#2f7d4a;
+
+  --gp-accent:#2f6fb3;
+  --gp-accent-hover:#255d97;
+  --gp-accent-ink:#ffffff;
+  --gp-accent-soft:rgba(47,111,179,.12);
+  --gp-ring:0 0 0 3px rgba(47,111,179,.3);
+
+  --gp-radius-s:6px;
+  --gp-radius-m:9px;
+  --gp-radius-l:12px;
+  --gp-ease:cubic-bezier(.32,.72,0,1);
+
   display:flex;flex-direction:column;height:100%;min-height:0;position:relative;
+  container-type:inline-size;
   font-family:var(--gp-font);font-size:12.5px;line-height:1.45;letter-spacing:-.006em;
   color:var(--gp-label);background:transparent;
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
 }
-.gp-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
-.gp-review{flex:none;position:relative;display:flex;flex-direction:column;gap:6px;padding:8px 10px}
-.gp-review-btn{width:100%;height:28px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:7px;background:var(--gp-fill-3);color:var(--gp-label);font:inherit;font-size:12.5px;font-weight:560;cursor:pointer;transition:background .12s ease-out}
-.gp-review-btn:hover:not(:disabled){background:var(--gp-fill-2)}
+body[data-ds-dark-theme] .gp-root{
+  --gp-orange:#ffb340;
+  --gp-purple:#c08cff;
+  --gp-blue:#66a9ff;
+  --gp-file-code:#e0c07a;
+  --gp-file-data:#b9a3e3;
+  --gp-file-style:#6fc7e8;
+  --gp-file-doc:#7fa6cf;
+  --gp-file-image:#c08ed6;
+  --gp-file-media:#e08ab0;
+  --gp-file-font:#d8c98a;
+  --gp-file-archive:#9aa3ad;
+  --gp-file-lock:#a9a9b3;
+  --gp-file-shell:#8fd39a;
+  --gp-accent:#9dbcd8;
+  --gp-accent-hover:#b2cbe2;
+  --gp-accent-ink:#0d1319;
+  --gp-accent-soft:rgba(157,188,216,.16);
+  --gp-ring:0 0 0 3px rgba(157,188,216,.3);
+}
+.gp-root ::-webkit-scrollbar{width:9px;height:9px}
+.gp-root ::-webkit-scrollbar-track{background:transparent}
+.gp-root ::-webkit-scrollbar-thumb{background:var(--dsw-alias-scrollbar-bg-l2,#3b3b40);border-radius:999px;border:2px solid transparent;background-clip:content-box}
+.gp-root ::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-scrollbar-hover-l2,#4a4a50);background-clip:content-box}
+
+.gp-changes,.gp-graph-list,.gp-diff-body{overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--dsw-alias-scrollbar-bg-l2,#3b3b40) transparent}
+
+/* --- review --------------------------------------------------------------- */
+.gp-review{flex:none;display:flex;flex-direction:column;gap:6px;padding:8px 12px 6px}
+.gp-review-head{display:flex;align-items:center;gap:6px;align-self:flex-start;font-size:10.5px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--gp-label-3);cursor:pointer;user-select:none;padding:2px 6px;margin-left:-6px;border-radius:var(--gp-radius-s);transition:background .12s var(--gp-ease),color .12s var(--gp-ease)}
+.gp-review-head:hover{background:var(--gp-hover);color:var(--gp-label-2)}
+.gp-review-head:focus-visible{outline:none;box-shadow:var(--gp-ring)}
+.gp-review-btn{width:100%;height:28px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:.5px solid var(--gp-separator);border-radius:var(--gp-radius-s);background:transparent;color:var(--gp-label-2);font:inherit;font-size:12px;font-weight:560;cursor:pointer;transition:background .12s var(--gp-ease),color .12s var(--gp-ease),border-color .12s var(--gp-ease)}
+.gp-review-btn:hover:not(:disabled){background:var(--gp-hover);border-color:var(--gp-label-4);color:var(--gp-label)}
+.gp-review-btn:active:not(:disabled){transform:scale(.995)}
 .gp-review-btn:disabled{opacity:.42;cursor:default}
-.gp-review-head{font-size:10.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--gp-label-3);cursor:pointer;user-select:none}
-.gp-review-head:hover{color:var(--gp-label-2)}
-.gp-changes{flex:1;min-height:80px;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
-.gp-resizer{flex:none;position:relative;height:8px;cursor:row-resize;background:transparent;user-select:none;touch-action:none}
-.gp-resizer:hover,.gp-resizer:active{background:var(--gp-fill-3)}
-.gp-graph-panel{flex:none;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin}
-.gp-toolbar{display:flex;align-items:center;gap:6px;flex:none;padding:8px 10px;border-bottom:.5px solid var(--gp-separator)}
-.gp-toolbar .gp-spacer{flex:1}
-.gp-branch{display:inline-flex;align-items:center;gap:5px;min-width:0;max-width:100%;height:22px;padding:0 8px;border-radius:6px;background:var(--gp-fill-3);color:var(--gp-label);font-family:var(--gp-mono);font-size:11px;letter-spacing:0;border:none;cursor:pointer;transition:background .12s ease-out}
-.gp-branch:hover{background:var(--gp-fill-2)}
-.gp-branch span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gp-tag{font-size:10.5px;line-height:16px;padding:0 6px;border-radius:999px;background:var(--gp-fill-3);color:var(--gp-label-2)}
-.gp-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:24px;min-width:24px;padding:0 6px;border-radius:6px;border:none;background:transparent;color:var(--gp-label-2);font:inherit;font-size:11.5px;cursor:pointer;transition:background .12s ease-out,color .12s ease-out}
-.gp-btn:hover:not(:disabled){background:var(--gp-fill-3);color:var(--gp-label)}
-.gp-btn:active:not(:disabled){background:var(--gp-fill-2)}
-.gp-btn:disabled{opacity:.38;cursor:default}
-.gp-btn svg{width:13px;height:13px;flex:none}
-.gp-btn-danger:hover:not(:disabled){background:rgba(255,69,58,.18);color:var(--gp-red)}
-.gp-primary{height:28px;padding:0 12px;border-radius:7px;border:none;background:var(--gp-accent);color:var(--gp-accent-ink);font:inherit;font-size:12.5px;font-weight:590;letter-spacing:-.01em;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background .12s ease-out,transform .06s ease-out}
-.gp-primary:hover:not(:disabled){background:var(--gp-accent-hover)}
-.gp-primary:active:not(:disabled){transform:scale(.985)}
-.gp-primary:disabled{background:var(--gp-accent-dim);color:var(--gp-label-3);cursor:default}
-.gp-compose{flex:none;display:flex;flex-direction:column;gap:8px;padding:10px}
-.gp-input{box-sizing:border-box;width:100%;min-height:36px;max-height:132px;resize:none;field-sizing:content;padding:8px 10px;border-radius:var(--gp-radius);border:.5px solid rgba(255,255,255,.07);background:#2e2e2e;color:rgba(255,255,255,.94);font:inherit;font-size:12.5px;line-height:1.45;outline:none;transition:border-color .12s ease-out,box-shadow .12s ease-out}
-.gp-input:focus{border-color:var(--gp-accent);box-shadow:0 0 0 3.5px rgba(128,161,192,.28)}
-.gp-input::placeholder{color:var(--gp-label-3)}
-.gp-compose .gp-input-wrap{position:relative;display:flex}
-.gp-input-wrap .gp-input{padding-right:34px}
-.gp-input-ai{position:absolute;top:5px;right:5px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:none;border-radius:6px;background:transparent;color:var(--gp-label-3);cursor:pointer;transition:background .12s ease-out,color .12s ease-out}
-.gp-input-ai:hover:not(:disabled){background:var(--gp-fill-3);color:var(--gp-label)}
-.gp-input-ai:disabled{opacity:.35;cursor:default}
-.gp-input-ai svg{width:14px;height:14px;flex:none}
-.gp-actions{display:flex;align-items:center;gap:6px}
-.gp-actions > .gp-primary{flex:1}
-.gp-actions .gp-primary{width:100%;height:32px;justify-content:center;gap:6px;font-size:13px;border-radius:8px}
-.gp-actions .gp-primary svg{width:14px;height:14px;flex:none}
-.gp-actions .gp-primary-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gp-menu-wrap{position:relative}
-.gp-menu{position:absolute;z-index:40;top:calc(100% + 6px);right:0;min-width:200px;padding:5px;border-radius:10px;border:.5px solid rgba(255,255,255,.1);background:rgba(40,40,44,.86);backdrop-filter:saturate(180%) blur(24px);-webkit-backdrop-filter:saturate(180%) blur(24px);box-shadow:0 12px 32px rgba(0,0,0,.48),0 0 0 .5px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:1px}
-.gp-menu button{display:flex;width:100%;align-items:center;gap:7px;height:28px;padding:0 8px;border:none;border-radius:6px;background:transparent;color:var(--gp-label);font:inherit;font-size:12.5px;text-align:left;cursor:pointer;transition:background .1s ease-out}
-.gp-menu button:hover:not(:disabled){background:var(--gp-accent)}
-.gp-menu button:hover:not(:disabled){color:var(--gp-accent-ink)}
-.gp-menu button:disabled{opacity:.4;cursor:default}
+.gp-review-btn svg{width:13px;height:13px;flex:none}
+
+/* --- changes -------------------------------------------------------------- */
+.gp-changes{flex:1;min-height:90px;padding:2px 0 6px}
 .gp-section{flex:none}
-.gp-section-head{display:flex;align-items:center;gap:6px;padding:0 8px 0 10px;min-height:30px;cursor:pointer;user-select:none;transition:background .1s ease-out}
-.gp-section-head:hover{background:var(--gp-fill-4)}
-.gp-section-title{font-weight:600;font-size:11px;letter-spacing:.055em;text-transform:uppercase;color:var(--gp-label-3)}
-.gp-section-count{margin-left:2px;font-size:11px;color:var(--gp-label-3);font-variant-numeric:tabular-nums}
-.gp-chevron{width:11px;height:11px;flex:none;color:var(--gp-label-3);transition:transform .18s cubic-bezier(.32,.72,0,1)}
+.gp-section-head{display:flex;align-items:center;gap:2px;padding:0 6px;height:30px}
+.gp-section-head-graph{height:34px;padding:0 6px 0 4px;border-top:.5px solid var(--gp-hairline);border-bottom:.5px solid var(--gp-hairline);gap:2px}
+.gp-section-toggle{display:flex;align-items:center;gap:6px;min-width:0;height:24px;padding:0 5px;border-radius:var(--gp-radius-s);cursor:pointer;user-select:none;color:inherit;background:transparent;transition:background .12s var(--gp-ease)}
+.gp-section-toggle:hover{background:var(--gp-hover)}
+.gp-section-toggle:focus-visible{outline:none;box-shadow:var(--gp-ring)}
+.gp-section-title{font-size:10.5px;font-weight:650;letter-spacing:.045em;text-transform:uppercase;color:var(--gp-label-3);white-space:nowrap}
+.gp-section-count{min-width:17px;height:15px;padding:0 5px;border-radius:999px;background:var(--gp-hover);color:var(--gp-label-3);font-size:10px;font-weight:600;line-height:15px;text-align:center;font-variant-numeric:tabular-nums}
+.gp-chevron{width:11px;height:11px;flex:none;color:var(--gp-label-3);transition:transform .2s var(--gp-ease)}
 .gp-chevron.open{transform:rotate(90deg)}
-.gp-section-actions{margin-left:auto;display:flex;align-items:center;gap:2px}
-.gp-group-head{display:flex;align-items:center;gap:6px;padding:2px 8px 2px 22px;min-height:22px;color:var(--gp-label-3);font-size:11px;font-weight:500}
-.gp-group-head .gp-section-actions{gap:0}
-.gp-row{display:flex;align-items:center;gap:8px;min-height:30px;padding:0 6px 0 22px;cursor:pointer;position:relative;transition:background .1s ease-out}
-.gp-row:hover{background:var(--gp-fill-4)}
-.gp-row.selected{background:rgba(128,161,192,.18)}
-.gp-row .gp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;letter-spacing:-.006em}
+.gp-section-actions{position:relative;margin-left:auto;display:flex;align-items:center;gap:1px;flex:none}
+/* The branch popover belongs to the header's action cluster, not to the chip:
+   anchored to the chip it would hang off the panel's left edge. */
+.gp-section-actions .gp-menu-wrap{position:static}
+/* A narrow pane gives the branch chip the room fetch would otherwise take;
+   sync already covers fetch + pull + push. */
+@container (max-width: 300px){
+  .gp-section-head-graph .gp-btn-fetch{display:none}
+}
+
+.gp-row{display:flex;align-items:center;gap:8px;height:32px;margin:0 6px;padding:0 6px 0 8px;border-radius:7px;cursor:pointer;position:relative;transition:background .12s var(--gp-ease)}
+.gp-row:hover{background:var(--gp-hover)}
+.gp-row:active{background:var(--gp-press)}
+.gp-row:focus-visible{outline:none;box-shadow:var(--gp-ring)}
+.gp-row .gp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;letter-spacing:-.01em}
 .gp-row .gp-name .gp-dir{color:var(--gp-label-3)}
-/* One chip per change kind: M pencil, A plus, U dashed plus, D minus, R arrow,
-   C copy, T swap, CONFLICT alert. The chip carries the colour; the tooltip and
-   aria-label carry the word. */
-.gp-change{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5.5px;background:var(--gp-fill-4);border:.5px solid transparent;color:var(--gp-label-2);transition:background .12s ease-out}
-.gp-change svg{width:12px;height:12px;flex:none}
-.gp-change.M{color:var(--gp-orange);background:rgba(255,159,10,.13);border-color:rgba(255,159,10,.3)}
-.gp-change.A{color:var(--gp-green);background:rgba(48,209,88,.13);border-color:rgba(48,209,88,.3)}
-.gp-change.U{color:var(--gp-green);background:rgba(48,209,88,.06);border:.5px dashed rgba(48,209,88,.55)}
-.gp-change.D{color:var(--gp-red);background:rgba(255,69,58,.13);border-color:rgba(255,69,58,.3)}
-.gp-change.R,.gp-change.C{color:var(--gp-blue);background:rgba(10,132,255,.14);border-color:rgba(10,132,255,.32)}
-.gp-change.T{color:var(--gp-purple);background:rgba(191,90,242,.14);border-color:rgba(191,90,242,.32)}
-.gp-change.CONFLICT{color:var(--gp-red);background:rgba(255,69,58,.2);border-color:rgba(255,69,58,.45)}
-.gp-ftype{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;color:var(--gp-label-3)}
-.gp-ftype svg{width:14px;height:14px;flex:none}
-.gp-ftype.code{color:#e0c07a}
-.gp-ftype.style{color:#6fc7e8}
-.gp-ftype.doc{color:#7fa6cf}
-.gp-ftype.image{color:#c08ed6}
-.gp-ftype.media{color:#e08ab0}
-.gp-ftype.font{color:#d8c98a}
-.gp-ftype.archive{color:#9aa3ad}
-.gp-ftype.lock{color:#a9a9b3}
-.gp-ftype.data{color:#8fcfa0}
-.gp-ftype.shell{color:#8fd39a}
-.gp-row-conflict .gp-change{color:var(--gp-red)}
-.gp-counts{display:flex;gap:5px;flex:none;font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--gp-label-3);font-family:var(--gp-mono)}
+.gp-row-conflict .gp-name{color:var(--gp-red)}
+.gp-counts{display:flex;gap:6px;flex:none;font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--gp-label-3);font-family:var(--gp-mono)}
 .gp-add{color:var(--gp-green)}
 .gp-del{color:var(--gp-red)}
 .gp-row-actions{display:none;align-items:center;gap:1px;flex:none}
 .gp-row:hover .gp-row-actions{display:flex}
 .gp-row:hover .gp-counts{display:none}
 .gp-row:hover .gp-change{display:none}
+
+/* --- change-kind chips ---------------------------------------------------- */
+.gp-change{flex:none;display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:5.5px;background:var(--gp-hover);border:.5px solid transparent;color:var(--gp-label-2)}
+.gp-change svg{width:12px;height:12px;flex:none}
+.gp-change.M{color:var(--gp-orange);background:color-mix(in srgb,var(--gp-orange) 13%,transparent);border-color:color-mix(in srgb,var(--gp-orange) 28%,transparent)}
+.gp-change.A{color:var(--gp-green);background:color-mix(in srgb,var(--gp-green) 13%,transparent);border-color:color-mix(in srgb,var(--gp-green) 28%,transparent)}
+.gp-change.U{color:var(--gp-green);background:color-mix(in srgb,var(--gp-green) 6%,transparent);border:.5px dashed color-mix(in srgb,var(--gp-green) 52%,transparent)}
+.gp-change.D{color:var(--gp-red);background:color-mix(in srgb,var(--gp-red) 13%,transparent);border-color:color-mix(in srgb,var(--gp-red) 28%,transparent)}
+.gp-change.R,.gp-change.C{color:var(--gp-blue);background:color-mix(in srgb,var(--gp-blue) 13%,transparent);border-color:color-mix(in srgb,var(--gp-blue) 28%,transparent)}
+.gp-change.T{color:var(--gp-purple);background:color-mix(in srgb,var(--gp-purple) 13%,transparent);border-color:color-mix(in srgb,var(--gp-purple) 28%,transparent)}
+.gp-change.CONFLICT{color:var(--gp-red);background:color-mix(in srgb,var(--gp-red) 18%,transparent);border-color:color-mix(in srgb,var(--gp-red) 42%,transparent)}
+
+/* --- file families -------------------------------------------------------- */
+.gp-ftype{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;color:var(--gp-label-4)}
+.gp-ftype svg{width:14px;height:14px;flex:none}
+.gp-ftype.code{color:var(--gp-file-code)}
+.gp-ftype.data{color:var(--gp-file-data)}
+.gp-ftype.style{color:var(--gp-file-style)}
+.gp-ftype.doc{color:var(--gp-file-doc)}
+.gp-ftype.image{color:var(--gp-file-image)}
+.gp-ftype.media{color:var(--gp-file-media)}
+.gp-ftype.font{color:var(--gp-file-font)}
+.gp-ftype.archive{color:var(--gp-file-archive)}
+.gp-ftype.lock{color:var(--gp-file-lock)}
+.gp-ftype.shell{color:var(--gp-file-shell)}
+
+/* --- buttons -------------------------------------------------------------- */
+.gp-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:24px;min-width:24px;padding:0 5px;border-radius:var(--gp-radius-s);border:none;background:transparent;color:var(--gp-label-3);font:inherit;font-size:11.5px;cursor:pointer;transition:background .12s var(--gp-ease),color .12s var(--gp-ease)}
+.gp-btn:hover:not(:disabled){background:var(--gp-hover);color:var(--gp-label)}
+.gp-btn:active:not(:disabled){background:var(--gp-press)}
+.gp-btn:focus-visible{outline:none;box-shadow:var(--gp-ring)}
+.gp-btn:disabled{opacity:.36;cursor:default}
+.gp-btn svg{width:13px;height:13px;flex:none}
+.gp-btn.active{background:var(--gp-accent-soft);color:var(--gp-accent)}
+.gp-btn-danger:hover:not(:disabled){background:color-mix(in srgb,var(--gp-red) 16%,transparent);color:var(--gp-red)}
+
+.gp-primary{height:30px;padding:0 12px;border-radius:8px;border:none;background:var(--gp-accent);color:var(--gp-accent-ink);font:inherit;font-size:12.5px;font-weight:600;letter-spacing:-.01em;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:background .12s var(--gp-ease),transform .08s var(--gp-ease)}
+.gp-primary:hover:not(:disabled){background:var(--gp-accent-hover)}
+.gp-primary:active:not(:disabled){transform:scale(.99)}
+.gp-primary:focus-visible{outline:none;box-shadow:var(--gp-ring),0 0 0 1px var(--gp-bg)}
+.gp-primary:disabled{background:color-mix(in srgb,var(--gp-label) 5%,transparent);color:var(--gp-label-4);cursor:default}
+.gp-primary svg{width:14px;height:14px;flex:none}
+
+/* --- commit box ----------------------------------------------------------- */
+.gp-compose{flex:none;display:flex;flex-direction:column;gap:8px;padding:12px 12px 10px;border-bottom:.5px solid var(--gp-hairline)}
+.gp-input{box-sizing:border-box;width:100%;min-height:38px;max-height:140px;resize:none;field-sizing:content;padding:9px 10px;border-radius:10px;border:.5px solid var(--gp-hairline);background:color-mix(in srgb,var(--gp-label) 4%,transparent);color:var(--gp-label);font:inherit;font-size:12.5px;line-height:1.45;outline:none;transition:border-color .12s var(--gp-ease),box-shadow .12s var(--gp-ease),background .12s var(--gp-ease)}
+.gp-input::placeholder{color:var(--gp-label-4)}
+.gp-input:hover{border-color:var(--gp-separator)}
+.gp-input:focus{border-color:color-mix(in srgb,var(--gp-accent) 60%,transparent);box-shadow:var(--gp-ring);background:color-mix(in srgb,var(--gp-label) 7%,transparent)}
+.gp-input-wrap{position:relative;display:flex}
+.gp-input-wrap .gp-input{padding-right:34px}
+.gp-input-ai{position:absolute;top:6px;right:6px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;padding:0;border:none;border-radius:var(--gp-radius-s);background:transparent;color:var(--gp-label-4);cursor:pointer;transition:background .12s var(--gp-ease),color .12s var(--gp-ease)}
+.gp-input-ai:hover:not(:disabled){background:var(--gp-hover);color:var(--gp-label-2)}
+.gp-input-ai:focus-visible{outline:none;box-shadow:var(--gp-ring)}
+.gp-input-ai:disabled{opacity:.32;cursor:default}
+.gp-input-ai svg{width:14px;height:14px;flex:none}
+.gp-actions{display:flex;align-items:center;gap:6px}
+.gp-actions .gp-primary{width:100%}
+.gp-primary-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* --- branch chip + popover menu ------------------------------------------- */
+.gp-menu-wrap{position:relative;display:inline-flex;min-width:0}
+.gp-branch{display:inline-flex;align-items:center;gap:5px;min-width:0;max-width:132px;height:24px;padding:0 8px;border-radius:7px;background:var(--gp-hover);border:.5px solid var(--gp-hairline);color:var(--gp-label);font-family:var(--gp-mono);font-size:11px;letter-spacing:0;cursor:pointer;transition:background .12s var(--gp-ease),border-color .12s var(--gp-ease)}
+.gp-branch:hover{background:var(--gp-press)}
+.gp-branch:focus-visible{outline:none;box-shadow:var(--gp-ring)}
+.gp-branch svg{width:11px;height:11px;flex:none;color:var(--gp-label-3)}
+.gp-branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gp-branch-meta{display:flex;gap:3px;flex:none;font-size:9.5px;color:var(--gp-label-3);font-variant-numeric:tabular-nums}
+.gp-branch-meta .up{color:var(--gp-green)}
+.gp-branch-meta .down{color:var(--gp-orange)}
+.gp-branch-waiting{cursor:default;color:var(--gp-label-3)}
+.gp-menu{position:absolute;z-index:50;top:calc(100% + 6px);right:0;min-width:216px;max-height:min(60vh,340px);overflow:auto;padding:5px;border-radius:11px;background:color-mix(in srgb,var(--gp-surface-3) 90%,transparent);backdrop-filter:saturate(180%) blur(30px);-webkit-backdrop-filter:saturate(180%) blur(30px);border:.5px solid var(--gp-hairline);box-shadow:0 18px 44px rgba(0,0,0,.42),0 0 0 .5px rgba(0,0,0,.18);animation:gp-pop .14s var(--gp-ease);display:flex;flex-direction:column;gap:1px}
+.gp-menu.up{top:auto;bottom:calc(100% + 6px);animation-name:gp-pop-up}
+.gp-menu-title{padding:4px 8px 3px;font-size:9.5px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--gp-label-4)}
+.gp-menu button{display:flex;width:100%;align-items:center;gap:8px;height:28px;padding:0 8px;border:none;border-radius:var(--gp-radius-s);background:transparent;color:var(--gp-label);font:inherit;font-size:12px;text-align:left;cursor:pointer;transition:background .1s var(--gp-ease),color .1s var(--gp-ease)}
+.gp-menu button:hover:not(:disabled){background:var(--gp-accent);color:var(--gp-accent-ink)}
+.gp-menu button:hover:not(:disabled) svg{color:currentColor}
+.gp-menu button:disabled{color:var(--gp-label-3);cursor:default}
+.gp-menu button svg{width:12px;height:12px;flex:none;color:var(--gp-label-3)}
+.gp-menu button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gp-menu-check{margin-left:auto;display:inline-flex;color:var(--gp-accent)}
+.gp-menu-check svg{color:currentColor}
+
+/* --- graph ---------------------------------------------------------------- */
+.gp-resizer{flex:none;position:relative;height:10px;margin:-3px 0;cursor:row-resize;background:transparent;user-select:none;touch-action:none}
+.gp-resizer:after{content:"";position:absolute;left:50%;top:50%;width:38px;height:3px;margin:-1.5px 0 0 -19px;border-radius:2px;background:var(--gp-separator);opacity:0;transition:opacity .15s var(--gp-ease)}
+.gp-resizer:hover:after,.gp-resizer:active:after{opacity:1}
+.gp-graph-panel{flex:none;display:flex;flex-direction:column;min-height:0;position:relative;overflow:visible}
+.gp-graph-list{flex:1;min-height:0;padding:2px 0 6px}
 .gp-graph{position:relative}
-.gp-graph-row{display:flex;align-items:center;gap:8px;min-height:38px;padding:0 8px 0 0;cursor:pointer;position:relative;transition:background .1s ease-out}
-.gp-graph-row:hover{background:var(--gp-fill-4)}
-.gp-graph-row.selected{background:rgba(128,161,192,.18)}
-.gp-graph-canvas{flex:none;display:block;overflow:visible}
-.gp-graph-row:hover .gp-graph-canvas{filter:brightness(1.18)}
-.gp-graph-row.selected .gp-graph-canvas{filter:brightness(1.3) saturate(1.1)}
+.gp-graph-row{display:flex;align-items:center;gap:8px;min-height:38px;margin:0 6px;padding:0 8px 0 2px;border-radius:8px;cursor:pointer;position:relative;transition:background .12s var(--gp-ease)}
+.gp-graph-row:hover{background:var(--gp-hover)}
+.gp-graph-row:focus-visible{outline:none;box-shadow:var(--gp-ring)}
+.gp-graph-row.selected{background:var(--gp-accent-soft);box-shadow:inset 2px 0 0 var(--gp-accent)}
+.gp-graph-canvas{flex:none;display:block;overflow:visible;transition:filter .15s var(--gp-ease)}
+.gp-graph-row:hover .gp-graph-canvas{filter:brightness(1.12)}
+.gp-graph-row.selected .gp-graph-canvas{filter:brightness(1.2) saturate(1.05)}
 .gp-graph-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.gp-graph-subject{display:flex;align-items:center;gap:6px;min-width:0}
-.gp-graph-subject .gp-subject-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
-.gp-ref{flex:none;max-width:132px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;line-height:16px;padding:0 6px;border-radius:999px;background:var(--gp-fill-3);color:var(--gp-label-2);font-weight:500}
-.gp-ref.head{background:rgba(10,132,255,.24);color:#9dc0ff}
-.gp-ref.tag{background:rgba(255,159,10,.2);color:#ffc477}
-.gp-ref.remote{background:rgba(191,90,242,.2);color:#d7a8ff}
-.gp-graph-meta{display:flex;align-items:center;gap:7px;font-size:10.5px;color:var(--gp-label-3)}
-.gp-graph-meta .gp-hash{font-family:var(--gp-mono)}
-.gp-detail{padding:8px 10px 10px 22px;border-bottom:.5px solid var(--gp-separator);background:rgba(120,120,128,.08)}
-.gp-detail-body{white-space:pre-wrap;word-break:break-word;font-size:11.5px;color:var(--gp-label-2);margin:5px 0 7px}
-.gp-kv{display:flex;gap:7px;font-size:11px;color:var(--gp-label-3)}
-.gp-kv b{font-weight:590;color:var(--gp-label-2)}
-.gp-detail-actions{display:flex;gap:2px;margin-top:7px}
-.gp-detail-files{margin-top:7px;display:flex;flex-direction:column;gap:2px;max-height:168px;overflow:auto}
-.gp-detail-file{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--gp-label-2)}
+.gp-graph-subject{display:flex;align-items:center;gap:5px;min-width:0}
+.gp-graph-subject .gp-subject-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;letter-spacing:-.01em}
+.gp-ref{flex:none;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:17px;padding:0 6px;border-radius:999px;background:var(--gp-hover);color:var(--gp-label-2);font-size:9.5px;font-weight:600;line-height:17px;letter-spacing:.01em}
+.gp-ref.head{background:color-mix(in srgb,var(--gp-accent) 24%,transparent);color:var(--gp-accent)}
+.gp-ref.tag{background:color-mix(in srgb,var(--gp-orange) 20%,transparent);color:var(--gp-orange)}
+.gp-ref.remote{background:color-mix(in srgb,var(--gp-purple) 20%,transparent);color:var(--gp-purple)}
+.gp-graph-meta{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;white-space:nowrap;font-size:10.5px;color:var(--gp-label-4);font-variant-numeric:tabular-nums}
+.gp-graph-meta > span{flex:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gp-graph-meta > span:not(.gp-hash){flex:0 1 auto}
+.gp-graph-meta > span + span:before{content:"·";margin-right:6px;color:var(--gp-label-4)}
+.gp-graph-meta .gp-hash{font-family:var(--gp-mono);font-size:10px;color:var(--gp-label-3);background:var(--gp-hover);border-radius:4px;padding:0 4px;line-height:15px}
+.gp-detail{margin:2px 6px 8px;padding:10px 12px;border-radius:var(--gp-radius-m);background:color-mix(in srgb,var(--gp-label) 4%,transparent);border:.5px solid var(--gp-hairline);animation:gp-fade .16s var(--gp-ease)}
+.gp-detail-body{white-space:pre-wrap;word-break:break-word;font-size:11.5px;color:var(--gp-label-2);margin:6px 0 8px}
+.gp-kv{display:flex;gap:8px;font-size:11px;color:var(--gp-label-3);line-height:1.7}
+.gp-kv b{font-weight:600;color:var(--gp-label-2)}
+.gp-detail-actions{display:flex;gap:1px;margin:6px 0 0 -5px}
+.gp-detail-files{margin-top:8px;padding-top:8px;border-top:.5px solid var(--gp-hairline);display:flex;flex-direction:column;gap:1px;max-height:168px;overflow:auto}
+.gp-detail-file{display:flex;align-items:center;gap:7px;height:24px;padding:0 4px;border-radius:5px;font-size:11px;color:var(--gp-label-2)}
+.gp-detail-file:hover{background:var(--gp-hover)}
 .gp-detail-file .gp-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gp-note{padding:12px;color:var(--gp-label-3);font-size:11.5px;text-align:center}
-.gp-error{margin:8px;padding:8px 10px;border-radius:10px;background:rgba(255,69,58,.12);border:.5px solid rgba(255,69,58,.28);color:var(--gp-label);font-size:11.5px;display:flex;gap:8px;align-items:center}
-.gp-error span{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap}
-/* Confirmation is an in-panel overlay anchored to the bottom edge: it used to be
-   a sticky row at the end of the column, which landed outside the visible pane
-   whenever the graph held its height. */
-.gp-confirm-scrim{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;padding:8px;background:rgba(12,12,14,.32)}
-.gp-confirm{flex:1;padding:9px 10px;border-radius:10px;background:rgba(44,44,48,.96);backdrop-filter:saturate(180%) blur(24px);-webkit-backdrop-filter:saturate(180%) blur(24px);border:.5px solid rgba(255,255,255,.12);box-shadow:0 12px 32px rgba(0,0,0,.5);font-size:11.5px;display:flex;gap:8px;align-items:center}
-.gp-confirm span{flex:1;min-width:0;line-height:1.45}
-.gp-confirm .gp-primary{height:24px;padding:0 10px;font-size:11.5px;flex:none}
+
+/* --- status note / error / toast ------------------------------------------ */
+.gp-note{padding:18px 14px;color:var(--gp-label-3);font-size:11.5px;text-align:center;line-height:1.5}
+.gp-error{margin:8px 12px 0;padding:9px 10px;border-radius:10px;background:color-mix(in srgb,var(--gp-red) 10%,transparent);border:.5px solid color-mix(in srgb,var(--gp-red) 24%,transparent);color:var(--gp-label);font-size:11.5px;display:flex;gap:8px;align-items:flex-start;animation:gp-fade .16s var(--gp-ease)}
+.gp-error-icon{flex:none;display:inline-flex;margin-top:1px;color:var(--gp-red)}
+.gp-error-icon svg{width:13px;height:13px}
+.gp-error span.gp-error-text{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap}
+.gp-toast{margin:8px 12px 0;padding:8px 10px;border-radius:9px;background:var(--gp-hover);color:var(--gp-label-2);font-size:11.5px;display:flex;gap:7px;align-items:center;animation:gp-fade .16s var(--gp-ease)}
+.gp-toast svg{width:13px;height:13px;flex:none;color:var(--gp-green)}
+
+/* --- confirm overlay ------------------------------------------------------ */
+.gp-confirm-scrim{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;padding:10px;background:color-mix(in srgb,#000 36%,transparent);animation:gp-fade .16s var(--gp-ease)}
+.gp-confirm{flex:1;padding:10px 12px;border-radius:var(--gp-radius-l);background:color-mix(in srgb,var(--gp-surface-3) 92%,transparent);backdrop-filter:saturate(180%) blur(28px);-webkit-backdrop-filter:saturate(180%) blur(28px);border:.5px solid var(--gp-hairline);box-shadow:0 18px 44px rgba(0,0,0,.45),0 0 0 .5px rgba(0,0,0,.2);font-size:11.5px;display:flex;gap:8px;align-items:center;animation:gp-rise .2s var(--gp-ease)}
+.gp-confirm span{flex:1;min-width:0;line-height:1.5}
+.gp-confirm .gp-primary{height:26px;padding:0 10px;font-size:11.5px;flex:none}
+
+/* --- diff page ------------------------------------------------------------ */
 .gp-diff{display:flex;flex-direction:column;height:100%;min-height:0;font-size:11.5px}
-.gp-diff-head{display:flex;align-items:center;gap:7px;padding:0 10px;min-height:34px;flex:none;border-bottom:.5px solid var(--gp-separator)}
+.gp-diff-head{display:flex;align-items:center;gap:8px;padding:0 12px;height:40px;flex:none;border-bottom:.5px solid var(--gp-hairline)}
 .gp-diff-head .gp-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--gp-mono);font-size:11.5px}
-.gp-diff-body{flex:1;min-height:0;overflow:auto;font-family:var(--gp-mono);font-size:11.5px;line-height:18px;scrollbar-width:thin}
-.gp-diff-line{display:flex;min-width:max-content;white-space:pre}
-.gp-diff-line .gp-ln{flex:none;width:42px;padding-right:8px;text-align:right;color:var(--gp-label-4);user-select:none;font-variant-numeric:tabular-nums}
-.gp-diff-line .gp-sign{flex:none;width:12px;text-align:center}
-.gp-diff-line .gp-code{flex:1;padding-right:14px;white-space:pre}
-.gp-diff-line.add{background:rgba(48,209,88,.13)}
+.gp-diff-body{flex:1;min-height:0;font-family:var(--gp-mono);font-size:11.5px;line-height:18px}
+.gp-diff-line{display:flex;box-sizing:border-box;width:max-content;min-width:100%;white-space:pre}
+.gp-diff-line.meta,.gp-diff-line.hunk{padding-left:10px}
+.gp-diff-line.meta .gp-ln,.gp-diff-line.hunk .gp-ln{width:0;padding:0}
+.gp-diff-line.meta .gp-sign,.gp-diff-line.hunk .gp-sign{width:0}
+.gp-diff-line .gp-ln{flex:none;width:40px;padding-right:8px;text-align:right;color:var(--gp-label-4);user-select:none;font-variant-numeric:tabular-nums;font-size:10.5px}
+.gp-diff-line .gp-sign{flex:none;width:14px;text-align:center}
+.gp-diff-line .gp-code{flex:1;padding-right:16px;white-space:pre}
+.gp-diff-line.add{background:var(--gp-code-add)}
 .gp-diff-line.add .gp-sign{color:var(--gp-green)}
-.gp-diff-line.del{background:rgba(255,69,58,.13)}
+.gp-diff-line.del{background:var(--gp-code-del)}
 .gp-diff-line.del .gp-sign{color:var(--gp-red)}
-.gp-diff-line.hunk{background:var(--gp-fill-4);color:var(--gp-label-3)}
-.gp-diff-line.meta{color:var(--gp-label-3)}
-.gp-diff-line .gp-prefix{color:var(--gp-label-3)}
+.gp-diff-line.hunk{background:var(--gp-surface-2);color:var(--gp-label-3);box-shadow:inset 2px 0 0 color-mix(in srgb,var(--gp-blue) 45%,transparent)}
+.gp-diff-line.meta{color:var(--gp-label-4)}
+
+/* --- misc ----------------------------------------------------------------- */
+.gp-tag{display:inline-flex;align-items:center;height:17px;padding:0 6px;border-radius:999px;background:var(--gp-hover);color:var(--gp-label-3);font-size:9.5px;font-weight:600}
 .gp-spinner{display:inline-block;width:11px;height:11px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:gp-spin .7s linear infinite}
 @keyframes gp-spin{to{transform:rotate(360deg)}}
-
+@keyframes gp-pop{from{opacity:0;transform:scale(.97) translateY(-3px)}to{opacity:1;transform:none}}
+@keyframes gp-pop-up{from{opacity:0;transform:scale(.97) translateY(3px)}to{opacity:1;transform:none}}
+@keyframes gp-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes gp-fade{from{opacity:0}to{opacity:1}}
 `
 
 		/* ------------------------------------------------------------------ */
@@ -944,6 +1067,27 @@ window.__ModuleLoader__.load({
 
 		const ChevronIcon = (props) => h('svg', { ...iconProps, width: 12, height: 12, className: props?.className }, h('path', { d: 'M6 3.5 10.5 8 6 12.5' }))
 		const RefreshIcon = () => h('svg', iconProps, h('path', { d: 'M13.5 8a5.5 5.5 0 1 1-1.9-4.2' }), h('path', { d: 'M13.5 2v3.2h-3.2' }))
+		/** Two arrows around a circle: fetch + pull + push, one verb. */
+		const SyncIcon = () =>
+			h(
+				'svg',
+				glyphProps,
+				h('path', { d: 'M2.6 8a5.4 5.4 0 0 1 9.2-3.8' }),
+				h('path', { d: 'M13.4 8a5.4 5.4 0 0 1-9.2 3.8' }),
+				h('path', { d: 'M12.4 1.6v2.9H9.5' }),
+				h('path', { d: 'M3.6 14.4v-2.9h2.9' }),
+			)
+		/** The graph's refs filter: a lane that forks. */
+		const GraphRefsIcon = () =>
+			h(
+				'svg',
+				glyphProps,
+				h('circle', { cx: 4, cy: 3.4, r: 1.5 }),
+				h('circle', { cx: 4, cy: 12.6, r: 1.5 }),
+				h('circle', { cx: 11.8, cy: 8, r: 1.5 }),
+				h('path', { d: 'M4 4.9v6.2' }),
+				h('path', { d: 'M5.3 7.1c2.5 0 3.5.4 5 1' }),
+			)
 		const PlusIcon = () => h('svg', iconProps, h('path', { d: 'M8 3v10M3 8h10' }))
 		const MinusIcon = () => h('svg', iconProps, h('path', { d: 'M3 8h10' }))
 		const UndoIcon = () => h('svg', iconProps, h('path', { d: 'M3 8a5 5 0 1 1 1.6 3.7' }), h('path', { d: 'M3 3.6V8h4.4' }))
@@ -1224,14 +1368,15 @@ window.__ModuleLoader__.load({
 		/* ------------------------------------------------------------------ */
 
 		/** A ghost icon button with an accessible label. */
-		function IconButton({ label, onClick, disabled, danger, children }) {
+		function IconButton({ label, onClick, disabled, danger, active, className, children }) {
 			return h(
 				'button',
 				{
 					type: 'button',
-					className: `gp-btn${danger === true ? ' gp-btn-danger' : ''}`,
+					className: `gp-btn${danger === true ? ' gp-btn-danger' : ''}${active === true ? ' active' : ''}${typeof className === 'string' ? ` ${className}` : ''}`,
 					title: label,
 					'aria-label': label,
+					'aria-pressed': active === undefined ? undefined : active === true,
 					disabled: disabled === true,
 					onClick: (event) => {
 						event.stopPropagation()
@@ -1242,15 +1387,40 @@ window.__ModuleLoader__.load({
 			)
 		}
 
-		/** One collapsible section header. */
-		function SectionHeader({ title, count, expanded, onToggle, actions, t }) {
+		/**
+		 * One collapsible section header.
+		 *
+		 * The collapse hit area is the label cluster only (chevron, title, count),
+		 * not the whole row: the right side now hosts real controls — the branch
+		 * menu and the repo verbs on the graph header — and a full-row toggle
+		 * would fire when the user aimed at them.
+		 */
+		function SectionHeader({ title, count, expanded, onToggle, actions, t, variant }) {
+			const label = expanded === true ? t('changes.collapse') : t('changes.expand')
 			return h(
 				'div',
-				{ className: 'gp-section-head', onClick: onToggle, role: 'button', tabIndex: 0, onKeyDown: (event) => (event.key === 'Enter' || event.key === ' ' ? onToggle?.() : undefined) },
-				h(ChevronIcon, { className: `gp-chevron${expanded ? ' open' : ''}` }),
-				h('span', { className: 'gp-section-title' }, title),
-				count === undefined ? null : h('span', { className: 'gp-section-count' }, String(count)),
-				h('div', { className: 'gp-section-actions', onClick: (event) => event.stopPropagation() }, actions),
+				{ className: `gp-section-head${variant === 'graph' ? ' gp-section-head-graph' : ''}` },
+				h(
+					'div',
+					{
+						className: 'gp-section-toggle',
+						role: 'button',
+						tabIndex: 0,
+						'aria-expanded': expanded === true,
+						title: label,
+						onClick: onToggle,
+						onKeyDown: (event) => {
+							if (event.key === 'Enter' || event.key === ' ') {
+								event.preventDefault()
+								onToggle?.()
+							}
+						},
+					},
+					h(ChevronIcon, { className: `gp-chevron${expanded ? ' open' : ''}` }),
+					h('span', { className: 'gp-section-title' }, title),
+					count === undefined ? null : h('span', { className: 'gp-section-count' }, String(count)),
+				),
+				h('div', { className: 'gp-section-actions' }, actions),
 			)
 		}
 
@@ -1279,7 +1449,12 @@ window.__ModuleLoader__.load({
 				h(FileTypeIcon, { path: entry.path }),
 				h('span', { className: 'gp-name' }, dir === '' ? null : h('span', { className: 'gp-dir' }, dir), name),
 				showCounts
-					? h('span', { className: 'gp-counts' }, h('span', { className: 'gp-add' }, `+${entry.additions}`), h('span', { className: 'gp-del' }, `-${entry.deletions}`))
+					? h(
+							'span',
+							{ className: 'gp-counts' },
+							entry.additions > 0 ? h('span', { className: 'gp-add' }, `+${entry.additions}`) : null,
+							entry.deletions > 0 ? h('span', { className: 'gp-del' }, `-${entry.deletions}`) : null,
+						)
 					: null,
 				h(ChangeBadge, { entry, t, group }),
 				h(
@@ -1855,6 +2030,13 @@ window.__ModuleLoader__.load({
 
 			const sectionToggle = (name) => () => setExpanded((current) => ({ ...current, [name]: current[name] !== true }))
 
+			/** One refresh verb for the whole pane: status and history together. */
+			const refreshAll = useCallback(() => {
+				setStatusVersion((value2) => value2 + 1)
+				setGraphVersion((value2) => value2 + 1)
+				status.refresh?.(true)
+			}, [status])
+
 			if (cwd === undefined) {
 				return h('div', { className: 'gp-root' }, h('div', { className: 'gp-note' }, t('empty.noRepo')))
 			}
@@ -1874,35 +2056,16 @@ window.__ModuleLoader__.load({
 			return h(
 				'div',
 				{ className: 'gp-root' },
-				h(
-					'div',
-					{ className: 'gp-toolbar' },
-					repo === undefined
-						? h('span', { className: 'gp-branch' }, h('span', { className: 'gp-spinner' }), h('span', null, t('empty.loading')))
-						: h(
-								'div',
-								{ className: 'gp-menu-wrap' },
-								h(BranchMenu, { t, repo, busy, onCheckout: (name) => run('checkout', { name }) }),
-							),
-					repo !== undefined && repo.detached === true ? h('span', { className: 'gp-tag' }, t('branch.detached')) : null,
-					repo !== undefined && repo.ahead > 0 ? h('span', { className: 'gp-tag' }, fill(t('branch.ahead'), { count: repo.ahead })) : null,
-					repo !== undefined && repo.behind > 0 ? h('span', { className: 'gp-tag' }, fill(t('branch.behind'), { count: repo.behind })) : null,
-					h('span', { className: 'gp-spacer' }),
-					repo === undefined
-						? null
-						: h(IconButton, { label: t('status.fetch'), disabled: busy, onClick: () => run('network', { mode: 'fetch' }, { graph: false }) }, h(CloudIcon, null)),
-					repo === undefined ? null : h(IconButton, { label: t('status.sync'), disabled: busy, onClick: () => run('network', { mode: 'sync' }, { graph: false }) }, h(RefreshIcon, null)),
-					h(IconButton, { label: t('status.refresh'), disabled: busy, onClick: () => status.refresh?.(true) }, h(RefreshIcon, null)),
-				),
 				error === undefined
 					? null
 					: h(
 							'div',
-							{ className: 'gp-error' },
-							h('span', null, `${t('error.title')}: ${error.message}`),
+							{ className: 'gp-error', role: 'alert' },
+							h('span', { className: 'gp-error-icon' }, h(ChangeConflictIcon, null)),
+							h('span', { className: 'gp-error-text' }, `${t('error.title')}：${error.message}`),
 							h(IconButton, { label: t('error.dismiss'), onClick: () => setError(undefined) }, h('span', { 'aria-hidden': 'true' }, '✕')),
 						),
-				notice === undefined ? null : h('div', { className: 'gp-note' }, notice),
+				notice === undefined ? null : h('div', { className: 'gp-toast', role: 'status' }, h(CheckIcon, null), h('span', null, notice)),
 				h(CommitBox, {
 					t,
 					status: repo,
@@ -1912,7 +2075,9 @@ window.__ModuleLoader__.load({
 				h(
 					'div',
 					{ className: 'gp-changes' },
-					...sections.map((section) =>
+					repo === undefined
+						? h('div', { className: 'gp-note' }, t('empty.loading'))
+						: sections.map((section) =>
 						h(
 							'div',
 							{ className: 'gp-section', key: section.id },
@@ -1967,7 +2132,7 @@ window.__ModuleLoader__.load({
 						className: 'gp-review-btn',
 						disabled: busy || (repo?.staged?.length ?? 0) + (repo?.changes?.length ?? 0) + (repo?.untracked?.length ?? 0) === 0,
 						onClick: findIssues,
-					}, t('review.find')),
+					}, h(SparkleIcon, null), t('review.find')),
 				),
 				expanded.graph === false
 					? null
@@ -1984,91 +2149,127 @@ window.__ModuleLoader__.load({
 						className: 'gp-graph-panel',
 						style: expanded.graph === false ? null : { height: `${graphHeight}px` },
 					},
-					h(
-						'div',
-						{ className: 'gp-section' },
-						h(SectionHeader, {
-							t,
-							title: t('graph.title'),
-							count: graphRows.rows.length,
-							expanded: expanded.graph,
-							onToggle: sectionToggle('graph'),
-							actions: [
-								h(IconButton, { key: 'all', label: graphAll ? t('graph.all') : t('graph.head'), onClick: () => setGraphAll((value2) => !value2) }, h(BranchIcon, { size: 12 })),
-								h(IconButton, { key: 'refresh', label: t('status.refresh'), onClick: () => setGraphVersion((value2) => value2 + 1) }, h(RefreshIcon, null)),
-							],
-						}),
-						expanded.graph !== true
-							? null
-							: graph.loading === true && graphRows.rows.length === 0
-								? h('div', { className: 'gp-note' }, t('graph.loading'))
-								: graphRows.rows.length === 0
-									? h('div', { className: 'gp-note' }, t('graph.empty'))
-									: h(
-											'div',
-											{ className: 'gp-graph' },
-											graphRows.rows.map((row) =>
-												h(
-													React.Fragment,
-													{ key: row.commit.hash },
+					h(SectionHeader, {
+						t,
+						variant: 'graph',
+						title: t('graph.title'),
+						count: graphRows.rows.length,
+						expanded: expanded.graph,
+						onToggle: sectionToggle('graph'),
+						actions: [
+							repo === undefined
+								? h('span', { className: 'gp-branch gp-branch-waiting', key: 'branch' }, h('span', { className: 'gp-spinner' }), h('span', { className: 'gp-branch-name' }, t('empty.loading')))
+								: h(BranchMenu, {
+										key: 'branch',
+										t,
+										repo,
+										busy,
+										placement: 'up',
+										onCheckout: (name) => run('checkout', { name }),
+									}),
+							h(
+								IconButton,
+								{
+									key: 'refs',
+									label: graphAll ? t('graph.head') : t('graph.all'),
+									active: graphAll,
+									onClick: () => setGraphAll((value2) => !value2),
+								},
+								h(GraphRefsIcon, null),
+							),
+							repo === undefined
+								? null
+								: h(
+										IconButton,
+										{
+											key: 'fetch',
+											label: t('status.fetch'),
+											className: 'gp-btn-fetch',
+											disabled: busy,
+											onClick: () => run('network', { mode: 'fetch' }, { graph: false }),
+										},
+										h(CloudIcon, null),
+									),
+							repo === undefined
+								? null
+								: h(IconButton, { key: 'sync', label: t('status.sync'), disabled: busy, onClick: () => run('network', { mode: 'sync' }, { graph: false }) }, h(SyncIcon, null)),
+							h(IconButton, { key: 'refresh', label: t('status.refresh'), disabled: busy, onClick: refreshAll }, h(RefreshIcon, null)),
+						],
+					}),
+					expanded.graph !== true
+						? null
+						: h(
+								'div',
+								{ className: 'gp-graph-list' },
+								graph.loading === true && graphRows.rows.length === 0
+									? h('div', { className: 'gp-note' }, t('graph.loading'))
+									: graphRows.rows.length === 0
+										? h('div', { className: 'gp-note' }, t('graph.empty'))
+										: h(
+												'div',
+												{ className: 'gp-graph' },
+												graphRows.rows.map((row) =>
 													h(
-														'div',
-														{
-															className: `gp-graph-row${selected === row.commit.hash ? ' selected' : ''}`,
-															onClick: () => selectCommit(row.commit),
-															role: 'button',
-															tabIndex: 0,
-															onKeyDown: (event) => (event.key === 'Enter' ? selectCommit(row.commit) : undefined),
-														},
-														h(GraphCanvas, { row, laneCount: graphRows.laneCount }),
+														React.Fragment,
+														{ key: row.commit.hash },
 														h(
 															'div',
-															{ className: 'gp-graph-main' },
+															{
+																className: `gp-graph-row${selected === row.commit.hash ? ' selected' : ''}`,
+																onClick: () => selectCommit(row.commit),
+																role: 'button',
+																tabIndex: 0,
+																onKeyDown: (event) => (event.key === 'Enter' ? selectCommit(row.commit) : undefined),
+															},
+															h(GraphCanvas, { row, laneCount: graphRows.laneCount }),
 															h(
 																'div',
-																{ className: 'gp-graph-subject' },
-																h(Refs, { refs: row.commit.refs, t }),
-																h('span', { className: 'gp-subject-text', title: row.commit.subject }, row.commit.subject === '' ? '(无提交说明)' : row.commit.subject),
-															),
-															h(
-																'div',
-																{ className: 'gp-graph-meta' },
-																h('span', { className: 'gp-hash' }, row.commit.short),
-																h('span', null, row.commit.author),
-																h('span', null, relativeTime(row.commit.at)),
+																{ className: 'gp-graph-main' },
+																h(
+																	'div',
+																	{ className: 'gp-graph-subject' },
+																	h(Refs, { refs: row.commit.refs, t }),
+																	h('span', { className: 'gp-subject-text', title: row.commit.subject }, row.commit.subject === '' ? '(无提交说明)' : row.commit.subject),
+																),
+																h(
+																	'div',
+																	{ className: 'gp-graph-meta' },
+																	h('span', { className: 'gp-hash' }, row.commit.short),
+																	h('span', null, row.commit.author),
+																	h('span', null, relativeTime(row.commit.at)),
+																),
 															),
 														),
+														selected === row.commit.hash
+															? h(CommitDetail, {
+																	t,
+																	detail,
+																	loading: detailLoading,
+																	copied,
+																	onOpenDiff: (commit) => tabActions?.openTab(DIFF_KIND, { params: { hash: commit.hash, cwd: repo?.cwd } }),
+																	onCopy: (commit) => {
+																		try {
+																			navigator.clipboard?.writeText?.(commit.hash)
+																		} catch {}
+																		setCopied(true)
+																		setTimeout(() => setCopied(false), 1600)
+																	},
+																	onCheckout:
+																		row.commit.refs.some((ref) => ref.kind === 'branch' || ref.kind === 'head')
+																			? () => {
+																					const ref = row.commit.refs.find((entry) => entry.kind === 'branch')
+																					if (ref !== undefined) run('checkout', { name: ref.name })
+																				}
+																			: undefined,
+																})
+															: null,
 													),
-													selected === row.commit.hash
-														? h(CommitDetail, {
-																t,
-																detail,
-																loading: detailLoading,
-																copied,
-																onOpenDiff: (commit) => tabActions?.openTab(DIFF_KIND, { params: { hash: commit.hash, cwd: repo?.cwd } }),
-																onCopy: (commit) => {
-																	try {
-																		navigator.clipboard?.writeText?.(commit.hash)
-																	} catch {}
-																	setCopied(true)
-																	setTimeout(() => setCopied(false), 1600)
-																},
-																onCheckout:
-																	row.commit.refs.some((ref) => ref.kind === 'branch' || ref.kind === 'head')
-																		? () => {
-																				const ref = row.commit.refs.find((entry) => entry.kind === 'branch')
-																				if (ref !== undefined) run('checkout', { name: ref.name })
-																			}
-																		: undefined,
-															})
-														: null,
 												),
+												graph.value?.truncated === true ? h('div', { className: 'gp-note' }, fill(t('graph.truncated'), { count: graphRows.rows.length })) : null,
 											),
-											graph.value?.truncated === true ? h('div', { className: 'gp-note' }, fill(t('graph.truncated'), { count: graphRows.rows.length })) : null,
-										),
-					),
+							),
 				),
-				confirming === undefined
+								confirming === undefined
 					? null
 					: h(ConfirmBar, {
 							t,
@@ -2154,11 +2355,37 @@ window.__ModuleLoader__.load({
 			)
 		}
 
-		/** The branch chip and its checkout menu. */
-		function BranchMenu({ t, repo, busy, onCheckout }) {
+		/**
+		 * What the branch chip says: the checked-out name (or the short hash when
+		 * detached) plus the divergence the old toolbar used to show as three
+		 * separate tags.
+		 * @param {object} repo - status payload.
+		 * @returns {{label: string, detached: boolean, ahead: number, behind: number}} chip facts.
+		 */
+		function branchSummaryOf(repo) {
+			const detached = repo?.detached === true
+			const raw = detached ? String(repo?.oid ?? '') : String(repo?.branch ?? '')
+			const label = detached ? raw.slice(0, 7) || 'HEAD' : raw
+			return {
+				label,
+				detached,
+				ahead: Number(repo?.ahead) || 0,
+				behind: Number(repo?.behind) || 0,
+			}
+		}
+
+		/**
+		 * The branch chip and its checkout menu.
+		 *
+		 * It lives in the graph header now, which sits at the bottom of the pane,
+		 * so the menu opens upward (`placement="up"`); a downward popover would be
+		 * clipped by the sidebar.
+		 */
+		function BranchMenu({ t, repo, busy, onCheckout, placement }) {
 			const [open, setOpen] = useState(false)
 			const [branches, setBranches] = useState(undefined)
 			const ref = useRef(null)
+			const summary = branchSummaryOf(repo)
 
 			useEffect(() => {
 				if (!open || branches !== undefined) return undefined
@@ -2173,24 +2400,54 @@ window.__ModuleLoader__.load({
 				const onDown = (event) => {
 					if (ref.current !== null && !ref.current.contains(event.target)) setOpen(false)
 				}
+				const onKey = (event) => {
+					if (event.key === 'Escape') setOpen(false)
+				}
 				document.addEventListener('mousedown', onDown)
-				return () => document.removeEventListener('mousedown', onDown)
+				document.addEventListener('keydown', onKey)
+				return () => {
+					document.removeEventListener('mousedown', onDown)
+					document.removeEventListener('keydown', onKey)
+				}
 			}, [open])
 
-			const label = repo.detached === true ? (repo.oid ?? t('branch.detached')) : (repo.branch ?? t('branch.detached'))
+			const diverged = summary.ahead + summary.behind
+			const detail = [
+				`${t('branch.current')}: ${summary.label}`,
+				summary.detached ? t('branch.detached') : '',
+				summary.ahead > 0 ? fill(t('branch.ahead'), { count: summary.ahead }) : '',
+				summary.behind > 0 ? fill(t('branch.behind'), { count: summary.behind }) : '',
+			].filter((part) => part !== '').join(' · ')
+
 			return h(
 				'div',
 				{ className: 'gp-menu-wrap', ref },
 				h(
 					'button',
-					{ type: 'button', className: 'gp-branch', title: `${t('branch.current')}: ${label}`, onClick: () => setOpen((value) => !value) },
-					h(BranchIcon, { size: 12 }),
-					h('span', null, label),
+					{
+						type: 'button',
+						className: 'gp-branch',
+						title: detail,
+						'aria-haspopup': 'menu',
+						'aria-expanded': open === true,
+						onClick: () => setOpen((value) => !value),
+					},
+					h(BranchIcon, { size: 11 }),
+					h('span', { className: 'gp-branch-name' }, summary.label),
+					summary.detached === true || diverged === 0
+						? null
+						: h(
+								'span',
+								{ className: 'gp-branch-meta' },
+								summary.ahead > 0 ? h('span', { className: 'up' }, `↑${summary.ahead}`) : null,
+								summary.behind > 0 ? h('span', { className: 'down' }, `↓${summary.behind}`) : null,
+							),
 				),
 				open
 					? h(
 							'div',
-							{ className: 'gp-menu', role: 'menu' },
+							{ className: `gp-menu${placement === 'up' ? ' up' : ''}`, role: 'menu' },
+							h('div', { className: 'gp-menu-title' }, t('branch.local')),
 							(branches?.local ?? []).map((branch) =>
 								h(
 									'button',
@@ -2206,10 +2463,10 @@ window.__ModuleLoader__.load({
 									},
 									h(BranchIcon, { size: 12 }),
 									h('span', null, branch.name),
-									branch.current === true ? h('span', { className: 'gp-tag' }, t('branch.current')) : null,
+									branch.current === true ? h('span', { className: 'gp-menu-check' }, h(CheckIcon, null)) : null,
 								),
 							),
-							(branches?.local ?? []).length === 0 ? h('div', { className: 'gp-note' }, t('graph.loading')) : null,
+							(branches?.local ?? []).length === 0 ? h('div', { className: 'gp-note' }, t('empty.loading')) : null,
 						)
 					: null,
 			)
@@ -2314,6 +2571,7 @@ window.__ModuleLoader__.load({
 				h(
 					'div',
 					{ className: 'gp-diff-head' },
+					typeof request.path === 'string' ? h(FileTypeIcon, { path: request.path }) : null,
 					h('span', { className: 'gp-path', title: request.path ?? request.hash ?? t('diff.title') }, request.path ?? request.hash ?? t('diff.title')),
 					mode === undefined ? null : h('span', { className: 'gp-tag' }, mode),
 					parsed.additions > 0 ? h('span', { className: 'gp-add' }, `+${parsed.additions}`) : null,
@@ -2477,6 +2735,8 @@ window.__ModuleLoader__.load({
 			__test: {
 				buildReviewPrompt,
 				ChangeBadge,
+				branchSummaryOf,
+				messages: { zh, en },
 				changeKindOf,
 				diffRequestFor,
 				discardRequestFor,

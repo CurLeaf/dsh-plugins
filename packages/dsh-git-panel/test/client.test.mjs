@@ -342,3 +342,20 @@ test('the change chip renders one class per kind and a readable label', () => {
 	assert.equal(conflict.props.className, 'gp-change CONFLICT')
 	assert.equal(conflict.props.title, 'change.conflict')
 })
+
+test('the branch chip folds ahead/behind into one summary', () => {
+	const { plugin } = loadClient()
+	const { branchSummaryOf } = plugin.__test
+	assert.deepEqual(
+		JSON.parse(JSON.stringify(branchSummaryOf({ branch: 'main', ahead: 2, behind: 1 }))),
+		{ label: 'main', detached: false, ahead: 2, behind: 1 },
+	)
+	assert.deepEqual(
+		JSON.parse(JSON.stringify(branchSummaryOf({ branch: null, detached: true, oid: 'cce8bbb8bc1a' }))),
+		{ label: 'cce8bbb', detached: true, ahead: 0, behind: 0 },
+	)
+	assert.deepEqual(
+		JSON.parse(JSON.stringify(branchSummaryOf({ branch: 'feat/x', ahead: 0, behind: 0 }))),
+		{ label: 'feat/x', detached: false, ahead: 0, behind: 0 },
+	)
+})
