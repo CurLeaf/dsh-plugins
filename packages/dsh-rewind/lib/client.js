@@ -114,7 +114,7 @@ window.__ModuleLoader__.load({
 
 		/** Host-visible trace: proves which client steps actually ran. */
 		function trace(step, extra) {
-			void call({ action: 'hello', step, ...extra }).catch(() => {})
+			void call({ action: 'hello', step, detail: extra === undefined ? undefined : JSON.stringify(extra) }).catch(() => {})
 		}
 
 		/** Cached per-session turn summary. */
@@ -339,6 +339,9 @@ window.__ModuleLoader__.load({
 
 			const count = row?.files ?? 0
 			const canUndo = summary?.lastRevert !== undefined && summary.lastRevert !== null
+			/* The inline button is the primary affordance; the footer only takes
+			 * over if DOM anchoring stops working (a future Host layout change). */
+			if (inline.ok) return null
 			if (sessionId === undefined) return null
 			if (count === 0 && done === undefined) return null
 
@@ -443,6 +446,9 @@ window.__ModuleLoader__.load({
 		/* ------------------------------------------------------------------ */
 
 		const inline = {
+			ok: false,
+			tracedAt: 0,
+			summaryAt: 0,
 			sessionId: undefined,
 			renderedFor: undefined,
 			summary: undefined,
@@ -647,8 +653,12 @@ window.__ModuleLoader__.load({
 		/** Drop cached state and re-anchor every button. */
 		async function refreshButtons(sessionId) {
 			inline.summary = undefined
+			inline.summaryAt = 0
 			const summary = await loadSummary(sessionId, { fresh: true })
-			if (summary !== undefined && summary.__error === undefined) inline.summary = summary
+			if (summary !== undefined && summary.__error === undefined) {
+				inline.summary = summary
+				inline.summaryAt = Date.now()
+			}
 			dropButtons()
 			paintButtons()
 		}
@@ -663,14 +673,32 @@ window.__ModuleLoader__.load({
 			const summary = inline.summary
 			if (summary === undefined) return
 			const turns = new Map(summary.turns.filter((row) => row.files > 0).map((row) => [row.turn, row]))
-			for (const item of document.querySelectorAll('[data-chat-flow-kind="user"][data-chat-turn]')) {
+			const items = [...document.querySelectorAll('[data-chat-flow-kind="user"][data-chat-turn]')]
+			let painted = 0
+			let missingCopy = 0
+			for (const item of items) {
 				const turn = Number(item.getAttribute('data-chat-turn'))
 				if (!turns.has(turn)) continue
 				if (item.querySelector('[data-dsh-rewind-btn]') !== null) continue
 				const buttons = [...item.querySelectorAll('button')].filter((button) => button.closest('pre, code') === null)
 				const copy = buttons.at(-1)
-				if (copy === undefined) continue
+				if (copy === undefined) {
+					missingCopy += 1
+					continue
+				}
 				copy.insertAdjacentElement('afterend', makeInlineButton(turn))
+				painted += 1
+			}
+			if (painted > 0) inline.ok = true
+			if (painted > 0 || Date.now() - inline.tracedAt > 60_000) {
+				inline.tracedAt = Date.now()
+				trace('paint', {
+					items: String(items.length),
+					rows: items.map((item) => item.getAttribute('data-chat-turn')).join(','),
+					turns: [...turns.keys()].join(','),
+					painted: String(painted),
+					missing: String(missingCopy),
+				})
 			}
 		}
 
@@ -683,9 +711,13 @@ window.__ModuleLoader__.load({
 				inline.renderedFor = sessionId
 				dropButtons()
 			}
-			if (inline.summary === undefined) {
+			const stale = inline.summary === undefined || Date.now() - (inline.summaryAt ?? 0) > 5000
+			if (stale) {
 				const summary = await loadSummary(sessionId)
-				if (summary !== undefined && summary.__error === undefined) inline.summary = summary
+				if (summary !== undefined && summary.__error === undefined) {
+					inline.summary = summary
+					inline.summaryAt = Date.now()
+				}
 			}
 			paintButtons()
 		}
@@ -723,7 +755,7 @@ window.__ModuleLoader__.load({
 						ctx.slots.register(
 							{
 								name: 'conversation.chat.turnTail',
-								key: 'rewind',
+								id: 'dsh-rewind-turn',
 								locale: NS,
 								inject: (sessionId) => ({ sessionId, t }),
 							},
@@ -734,7 +766,7 @@ window.__ModuleLoader__.load({
 				)
 				trace('slot-registered')
 			} catch (error) {
-				trace('slot-error', { message: error instanceof Error ? error.message : String(error) })
+				trace('slot-error', { message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? String(error.stack).slice(0, 160) : '' })
 			}
 		}
 

@@ -234,7 +234,7 @@ export function apply(ctx) {
 	 * @param {string} action - action name the browser asked for.
 	 * @param {string | undefined} sessionId - session it named, when any.
 	 */
-	const probe = (action, sessionId, step) => {
+	const probe = (action, sessionId, step, detail) => {
 		try {
 			const path = join(root, 'access.log')
 			try {
@@ -242,7 +242,7 @@ export function apply(ctx) {
 			} catch {
 				/* first line */
 			}
-			appendFileSync(path, `${new Date().toISOString()} ${action} ${sessionId ?? '-'} ${step ?? '-'}\n`, { mode: 0o600 })
+			appendFileSync(path, `${new Date().toISOString()} ${action} ${sessionId ?? '-'} ${step ?? '-'} ${String(detail ?? '-').slice(0, 240)}\n`, { mode: 0o600 })
 		} catch {
 			/* a probe must never break a request */
 		}
@@ -256,7 +256,7 @@ export function apply(ctx) {
 	 */
 	const perform = async (payload) => {
 		const action = payload?.action
-		probe(String(action), payload?.sessionId, payload?.step)
+		probe(String(action), payload?.sessionId, payload?.step, payload?.detail)
 		if (action === 'hello') return { ok: true, version: 1 }
 		if (action === 'current') {
 			let newest
