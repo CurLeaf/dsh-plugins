@@ -31,6 +31,9 @@ window.__ModuleLoader__.load({
 			'action.label': '回退本轮',
 			'action.inline': '回退第 {turn} 轮的文件改动',
 			'title.turn': '回退第 {turn} 轮',
+			'forget': '同时回滚上下文：模型不再记得这一轮（会话名、队列不变）',
+			'forgot': '上下文已回滚（{count} 条从后续请求中移除）',
+			'forgetFailed': '文件已回退，但上下文回滚失败：{reason}',
 			'action.count': '回退本轮 · {count} 个文件',
 			'action.none': '本轮没有可回退的文件改动',
 			'title': '回退到本轮开始之前',
@@ -57,6 +60,9 @@ window.__ModuleLoader__.load({
 			'action.label': 'Rewind turn',
 			'action.inline': 'Revert the files turn {turn} changed',
 			'title.turn': 'Revert turn {turn}',
+			'forget': 'Also forget it: the model no longer sees this turn (title and queue stay)',
+			'forgot': 'Context rolled back ({count} entries removed from future requests)',
+			'forgetFailed': 'Files reverted, but the context rollback failed: {reason}',
 			'action.count': 'Rewind turn · {count} files',
 			'action.none': 'This turn changed no files',
 			'title': 'Revert to before this turn',
@@ -568,6 +574,17 @@ window.__ModuleLoader__.load({
 			}
 			panel.append(list)
 
+			const forgetRow = document.createElement('label')
+			forgetRow.className = 'dsh-rewind-pop-row dsh-rewind-pop-forget'
+			const forgetBox = document.createElement('input')
+			forgetBox.type = 'checkbox'
+			forgetBox.checked = inline.forgetByDefault !== false
+			const forgetText = document.createElement('span')
+			forgetText.className = 'dsh-rewind-pop-note'
+			forgetText.textContent = inline.translator('forget')
+			forgetRow.append(forgetBox, forgetText)
+			panel.append(forgetRow)
+
 			const actions = document.createElement('div')
 			actions.className = 'dsh-rewind-pop-actions'
 			const cancel = document.createElement('button')
@@ -586,10 +603,18 @@ window.__ModuleLoader__.load({
 				try {
 					const result = await call({ action: 'apply', sessionId, turn, paths: [...selected] })
 					inline.applied = { ...result, sessionId }
+					let forget
+					if (forgetBox.checked) {
+						try {
+							forget = await call({ action: 'forget', sessionId, turn })
+						} catch (problem) {
+							forget = { forgotten: false, reason: problem instanceof Error ? problem.message : String(problem) }
+						}
+					}
 					closePanel()
 					summaries.delete(sessionId)
 					await refreshButtons(sessionId)
-					showResult(anchor, result)
+					showResult(anchor, result, forget)
 				} catch (error) {
 					note.textContent = fill(inline.translator('error'), { message: error instanceof Error ? error.message : String(error) })
 					confirm.disabled = false
@@ -618,14 +643,19 @@ window.__ModuleLoader__.load({
 		}
 
 		/** Show the applied summary in a small strip below the button. */
-		function showResult(anchor, result) {
+		function showResult(anchor, result, forget) {
 			const strip = document.createElement('div')
 			strip.className = 'dsh-rewind-strip'
-			strip.textContent = fill(inline.translator('applied'), {
-				restored: result.restored,
-				deleted: result.deleted,
-				skipped: result.skipped.length,
-			})
+			const parts = [
+				fill(inline.translator('applied'), {
+					restored: result.restored,
+					deleted: result.deleted,
+					skipped: result.skipped.length,
+				}),
+			]
+			if (forget?.forgotten === true) parts.push(fill(inline.translator('forgot'), { count: forget.removed ?? 0 }))
+			else if (forget !== undefined) parts.push(fill(inline.translator('forgetFailed'), { reason: forget.reason ?? 'unknown' }))
+			strip.textContent = parts.join(' · ')
 			const undo = document.createElement('button')
 			undo.type = 'button'
 			undo.className = 'dsh-rewind-pop-link'

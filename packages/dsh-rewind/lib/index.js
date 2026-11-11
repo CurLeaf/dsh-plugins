@@ -213,6 +213,61 @@ export function apply(ctx) {
 		)
 	}
 
+	/** Surface event types: only these carry a model-visible message. */
+	const SURFACE = new Set(['system/message', 'developer/message', 'user/message', 'assistant/message', 'tool/result'])
+
+	/**
+	 * Replace the model-visible context from `turn` onward with one short note.
+	 *
+	 * The session log stays append-only: the discarded entries are shadowed by a
+	 * `replace` surface operation, so every future request rebuilds history
+	 * without them while the transcript on disk remains complete. This is the
+	 * same surface mechanism compaction uses, and it keeps the session id, title,
+	 * queue and model selection untouched.
+	 *
+	 * @param {string} sessionId - live session to edit.
+	 * @param {number} turn - first turn to forget.
+	 * @returns {{forgotten: boolean, removed?: number, reason?: string}} outcome.
+	 */
+	const forgetFromTurn = (sessionId, turn) => {
+		const session = live.get(sessionId)
+		if (session === undefined) return { forgotten: false, reason: 'session-not-live' }
+		let events
+		try {
+			events = session.snapshotEvents?.() ?? []
+		} catch {
+			return { forgotten: false, reason: 'log-unavailable' }
+		}
+		const last = events[events.length - 1]
+		if (last !== undefined && last.type !== 'turn/end') return { forgotten: false, reason: 'turn-open' }
+		const start = events.find((event) => event.type === 'turn/start' && event.data?.turn === turn)
+		if (start === undefined) return { forgotten: false, reason: 'turn-not-found' }
+		const shadowed = events.filter((event) => event.seq >= start.seq && SURFACE.has(event.type))
+		if (shadowed.length === 0) return { forgotten: false, reason: 'nothing-to-forget' }
+		const startSeq = shadowed[0].seq
+		const endSeq = shadowed[shadowed.length - 1].seq
+		try {
+			session.append(
+				'developer/message',
+				{
+					message: {
+						role: 'developer',
+						content: [
+							{
+								type: 'text',
+								text: `The user reverted turn ${turn}: the file edits from that turn and everything after it were undone, and those messages were removed from this conversation. Do not rely on them; re-read any file before changing it again.`,
+							},
+						],
+					},
+				},
+				{ surfaceOp: { op: 'replace', startSeq, endSeq }, sourceEventSeqs: shadowed.map((event) => event.seq) },
+			)
+			return { forgotten: true, removed: shadowed.length }
+		} catch (error) {
+			return { forgotten: false, reason: error instanceof Error ? error.message : String(error) }
+		}
+	}
+
 	/** Resolve a session from an event seq, for slots without session context. */
 	const resolveBySeq = (seq) => {
 		for (const session of live.values()) {
@@ -291,6 +346,11 @@ export function apply(ctx) {
 			if (!Number.isInteger(turn) || turn < 1) throw new RouteError('bad-request', 'turn must be a positive integer')
 			const paths = Array.isArray(payload.paths) ? payload.paths.filter((path) => typeof path === 'string') : undefined
 			return await store.apply({ sessionId, targetTurn: turn, paths, force: payload.force === true })
+		}
+		if (action === 'forget') {
+			const turn = Number(payload.turn)
+			if (!Number.isInteger(turn) || turn < 1) throw new RouteError('bad-request', 'turn must be a positive integer')
+			return forgetFromTurn(sessionId, turn)
 		}
 		if (action === 'undo') {
 			if (typeof payload.revertId !== 'string') throw new RouteError('bad-request', 'revertId is required')
