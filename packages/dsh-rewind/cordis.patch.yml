@@ -1,0 +1,5 @@
+# Bundle layer of `@qzsy/dsh-rewind`: one Host/Client row. Installing the
+# package as a bundle mounts it; no manual profile patch is needed.
+- insert:
+    - id: rewind
+      name: '@qzsy/dsh-rewind'

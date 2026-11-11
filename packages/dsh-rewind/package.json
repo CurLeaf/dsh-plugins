@@ -1,0 +1,56 @@
+{
+  "name": "@qzsy/dsh-rewind",
+  "version": "0.1.0",
+  "description": "Cursor-style checkpoints for DeepSeek Harness: revert the files a turn changed, without touching the conversation, the session title or the queue.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-chat"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "license": "MIT",
+  "author": "curleaf",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "checkpoint",
+    "revert",
+    "rewind",
+    "undo"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CurLeaf/dsh-plugins.git",
+    "directory": "packages/dsh-rewind"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
