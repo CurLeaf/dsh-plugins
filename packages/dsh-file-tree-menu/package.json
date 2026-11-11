@@ -1,7 +1,7 @@
 {
   "name": "dsh-file-tree-menu",
-  "version": "0.1.0",
-  "description": "Right-click menu for the workspace file tree: add to the conversation, reveal in the file manager, copy the name / relative path / absolute path, rename, and delete.",
+  "version": "0.2.0",
+  "description": "Right-click actions for the workspace file tree: add a file or directory to the conversation, copy the name / relative path / absolute path, rename, and delete. Uses the shared DSH context menu, with a DOM fallback on older builds.",
   "type": "module",
   "main": "./lib/index.js",
   "exports": {
@@ -17,6 +17,7 @@
       "platform": "web",
       "immediately": true,
       "inject": [
+        "@deepseek-ai/dsh-client-ui-context-menu",
         "@deepseek-ai/dsh-client-ui-sidebar-files",
         "@deepseek-ai/dsh-client-ui-sidebar-right",
         "@deepseek-ai/dsh-client-ui-conversation"

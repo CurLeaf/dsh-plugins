@@ -1,34 +1,32 @@
 /**
  * Browser half of `dsh-file-tree-menu`.
  *
- * The right sidebar's workspace file tree (`@deepseek-ai/dsh-client-ui-sidebar-files`)
- * owns its rows: it renders `<li data-files-entry data-files-path>` with a plain
- * button, and nothing listens for `contextmenu`. There is no slot for a row
- * menu, so this plugin adds one the only way a client plugin can: a capture
- * listener on the document, scoped to the tree that owns the header slot it
- * renders in.
+ * DSH 0.2.2 gives the right sidebar's workspace file tree
+ * (`@deepseek-ai/dsh-client-ui-sidebar-files`) one first-class context-menu
+ * target per row: `file` and `directory`, both carrying the Session and the
+ * entry's absolute path. This plugin contributes to that shared menu, so its
+ * actions sit beside the product's own open / reveal / save items, work in the
+ * files page and beside docked or floating previews, and survive the tree's
+ * DOM or slot changes.
  *
- * It contributes, on right-click:
+ * It contributes:
  *
  *   添加到会话        insert `@relative/path` into the composer (undoable edit),
  *                     falling back to the clipboard when the composer face is
  *                     not mounted
- *   在访达中显示      the Host's own reveal route, with the label matching the
- *                    Host's platform (访达 / 文件资源管理器 / 文件管理器)
- *   复制              the entry's name
- *   复制相对路径      path relative to the workspace root
- *   复制绝对路径      the path the tree already carries
+ *   复制名称 / 相对路径 / 绝对路径
  *   重命名            in-place dialog; the Host route renames without overwrite
  *   删除              confirm dialog; the Host route deletes under the workspace
  *
  * The two write operations go through the plugin's Host half
  * (`POST /dsh-file-tree-menu/action`), because the tree's `workspaceFiles` Remote is
- * read-only. Every other item works entirely in the browser and keeps working
- * when the Host half is missing.
+ * read-only. The path / conversation items work entirely in the browser.
  *
- * The menu itself is the shared primitives `Menu`, so focus, Escape, outside
- * clicks and keyboard navigation are the product's own behaviour rather than a
- * reimplementation.
+ * Older DSH builds have no shared context menu (`contextMenus`). There the
+ * plugin keeps its original fallback: a capture listener on the rows of the tree
+ * that owns its header-slot bridge, with the same items in the shared `Menu`
+ * primitive. The fallback also keeps the Host's reveal action because those
+ * builds have no `open-in-app` contribution for file rows.
  */
 window.__ModuleLoader__.load({
 	id: 'dsh-file-tree-menu',
@@ -55,6 +53,21 @@ window.__ModuleLoader__.load({
 			finder: '在访达中显示',
 			explorer: '在文件资源管理器中显示',
 			directory: '在文件管理器中显示'
+		}
+
+		/** The always-mounted Session slot that carries `inputActions` into this plugin. */
+		const COMPOSER_SLOT = 'conversation.input.dock'
+
+		/** The shared icon seat the context menu renders action glyphs from. */
+		const MENU_ICON_SLOT = 'contextMenu.icon'
+
+		/** Keys this plugin publishes into `contextMenu.icon`. */
+		const ICON_KEYS = {
+			chat: 'file-tree-menu.chat',
+			copy: 'file-tree-menu.copy',
+			path: 'file-tree-menu.path',
+			edit: 'file-tree-menu.edit',
+			trash: 'file-tree-menu.trash'
 		}
 
 		/* ------------------------------------------------------------------ */
@@ -139,6 +152,15 @@ window.__ModuleLoader__.load({
 				warn('styles unavailable', error)
 			}
 		}
+
+		/** The shared context-menu service once DSH provides it; undefined on older builds. */
+		let menuService
+
+		/** Session id → the composer's public action face, captured from the conversation dock. */
+		const composerFaces = new Map()
+
+		/** The mounted dialog host, so a context-menu callback can open a rename/delete dialog. */
+		const dialogHost = { open: undefined }
 
 		/** One short-lived toast, replacing the previous one. */
 		let toastElement
@@ -247,6 +269,113 @@ window.__ModuleLoader__.load({
 			} catch {
 				return undefined
 			}
+		}
+
+		/** A Cordis service, without letting a missing one throw. */
+		const serviceOf = (ctx, name) => {
+			try {
+				return ctx.get(name)
+			} catch {
+				return undefined
+			}
+		}
+
+		/** Say something through the shared toast when DSH has one, else the plugin's own. */
+		const notify = (text, success = true) => {
+			try {
+				if (menuService && typeof menuService.notify === 'function') {
+					menuService.notify(text, success === true)
+					return
+				}
+			} catch {}
+			showToast(text)
+		}
+
+		/** Copy and say what was copied; a refused clipboard is reported, never silent. */
+		const copyAndNotify = async (text, description, failureLabel) => {
+			if (await copyText(text)) {
+				notify(`已复制${description}`, true)
+				return
+			}
+			throw new Error(failureLabel ?? '无法写入剪贴板')
+		}
+
+		/** Whether a path is absolute in either platform spelling (after normalization). */
+		const isAbsolutePath = (path) => path.startsWith('/') || /^[A-Za-z]:\//u.test(path) || path.startsWith('//')
+
+		/** The current Session's workspace root, when the sessions service is available. */
+		const sessionCwd = (ctx, sessionId) => {
+			try {
+				const sessions = serviceOf(ctx, 'sessions')
+				const list = sessions ? sessions.list : undefined
+				const snapshot = list && typeof list.getSnapshot === 'function' ? list.getSnapshot() : undefined
+				const entry = snapshot && snapshot.byId ? snapshot.byId[sessionId] : undefined
+				return entry && typeof entry.cwd === 'string' && entry.cwd.length > 0 ? entry.cwd : undefined
+			} catch {
+				return undefined
+			}
+		}
+
+		/**
+		 * The workspace-relative path of a shared-context-menu target.
+		 * The tree's row targets carry absolute paths; a relative path is kept as is.
+		 */
+		const relativePathOfTarget = (ctx, target) => {
+			if (typeof target.path !== 'string' || target.path.length === 0) return undefined
+			const path = normalizePath(target.path)
+			if (!isAbsolutePath(path)) return path
+			const cwd = sessionCwd(ctx, target.sessionId)
+			if (cwd === undefined) return undefined
+			return relativeTo(cwd, path)
+		}
+
+		/** The `@` reference text for a target, or undefined when it cannot be written. */
+		const mentionOfTarget = (ctx, target) => {
+			const relative = relativePathOfTarget(ctx, target)
+			if (relative === undefined || relative.length === 0) return undefined
+			return formatMention(relative, target.kind === 'directory')
+		}
+
+		/**
+		 * Resolve the Host's absolute path for a shared-context-menu target.
+		 * Tree rows already carry an absolute path; a relative target falls back to
+		 * `workspaceFiles.stat`, which is how the other sidebar callers resolve it.
+		 */
+		const absolutePathOfTarget = async (ctx, target, signal) => {
+			if (typeof target.path !== 'string' || target.path.length === 0) return undefined
+			if (isAbsolutePath(normalizePath(target.path))) return target.path
+			const workspaceFiles = remoteNamespace(ctx, 'workspaceFiles')
+			if (!workspaceFiles || typeof workspaceFiles.stat !== 'function') return undefined
+			try {
+				const result = await workspaceFiles.stat(target.sessionId, target.path, signal)
+				if (!result || result.ok !== true) return undefined
+				return result.value && typeof result.value.absolutePath === 'string' ? result.value.absolutePath : undefined
+			} catch (error) {
+				if (signal && signal.aborted === true) throw error
+				return undefined
+			}
+		}
+
+		/** Put one `@` reference into the Session's composer, or the clipboard when there is no face. */
+		const addMentionToConversation = async (target, mention) => {
+			const actions = composerFaces.get(target.sessionId)
+			if (actions && typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
+				try {
+					const span = actions.captureInsertion()
+					focusComposer()
+					if (span && actions.insertText(`${mention} `, span)) {
+						notify('已添加到会话', true)
+						return
+					}
+				} catch (error) {
+					warn('composer insertion failed', error)
+				}
+			}
+			if (await copyText(mention)) {
+				notify('输入框不可用，引用已复制到剪贴板', true)
+				return
+			}
+			throw new Error('无法写入输入框或剪贴板')
 		}
 
 		/* ------------------------------------------------------------------ */
@@ -392,11 +521,12 @@ window.__ModuleLoader__.load({
 		/* ------------------------------------------------------------------ */
 
 		/**
-		 * Renders the hidden anchor that identifies its tree, owns the menu and
-		 * dialogs, and listens for `contextmenu` on the rows of that tree only.
-		 * It is registered into the files tab header slot, which is the one place
-		 * this plugin is guaranteed to be mounted alongside the tree and to carry
-		 * the Session's `inputActions`.
+		 * Fallback for DSH builds without `contextMenus`: renders the hidden anchor
+		 * that identifies its tree, owns the menu and dialogs, and listens for
+		 * `contextmenu` on the rows of that tree only. It is registered into the
+		 * files tab header slot, which is the one place this plugin is guaranteed
+		 * to be mounted alongside the tree and to carry the Session's
+		 * `inputActions`.
 		 */
 		function FileMenuBridge(props) {
 			const ctx = props.ctx
@@ -669,10 +799,354 @@ window.__ModuleLoader__.load({
 		FileMenuBridge.displayName = 'DshFileMenuBridge'
 
 		/* ------------------------------------------------------------------ */
+		/* Shared-context-menu host                                            */
+		/* ------------------------------------------------------------------ */
+
+		/**
+		 * Mounted in the conversation's input dock (a Session-scoped list that is
+		 * drawn for every conversation). It captures the composer's `inputActions`
+		 * for the shared context menu, and owns the rename/delete dialog the menu
+		 * actions open. It renders nothing until a dialog is requested.
+		 */
+		function SessionMenuHost(props) {
+			const { sessionId, inputActions } = props
+			const [dialog, setDialog] = React.useState(null)
+			const inputRef = React.useRef(null)
+
+			React.useEffect(() => {
+				if (typeof sessionId !== 'string' || sessionId.length === 0 || inputActions === undefined || inputActions === null) return undefined
+				composerFaces.set(sessionId, inputActions)
+				return () => {
+					if (composerFaces.get(sessionId) === inputActions) composerFaces.delete(sessionId)
+				}
+			}, [sessionId, inputActions])
+
+			React.useEffect(() => {
+				dialogHost.open = setDialog
+				return () => {
+					if (dialogHost.open === setDialog) dialogHost.open = undefined
+				}
+			}, [])
+
+			React.useEffect(() => {
+				if (dialog === null) return
+				const input = inputRef.current
+				if (input === null) return
+				input.focus()
+				const dot = dialog.value.lastIndexOf('.')
+				const end = dot > 0 ? dot : dialog.value.length
+				try {
+					input.setSelectionRange(0, end)
+				} catch {}
+			}, [dialog === null])
+
+			const closeDialog = React.useCallback(() => setDialog(null), [])
+
+			const submitDialog = React.useCallback(async () => {
+				const current = dialog
+				if (current === null || current.busy === true) return
+				const target = current.target
+				if (current.kind === 'rename') {
+					const nextName = current.value
+					if (nextName.length === 0) {
+						setDialog({ ...current, error: '文件名不能为空' })
+						return
+					}
+					if (nextName === target.name) {
+						setDialog(null)
+						return
+					}
+					setDialog({ ...current, busy: true, error: undefined })
+					try {
+						await callHost({ action: 'rename', path: target.path, name: nextName })
+						setDialog(null)
+						notify(`已重命名为「${nextName}」`, true)
+					} catch (error) {
+						setDialog({ ...current, busy: false, error: messageOf(error) })
+					}
+					return
+				}
+				setDialog({ ...current, busy: true, error: undefined })
+				try {
+					await callHost({ action: 'delete', path: target.path })
+					setDialog(null)
+					notify(`已删除「${target.name}」`, true)
+				} catch (error) {
+					setDialog({ ...current, busy: false, error: messageOf(error) })
+				}
+			}, [dialog])
+
+			if (dialog === null) return null
+
+			const overlayPointer = (event) => {
+				if (event.target === event.currentTarget && dialog.busy !== true) closeDialog()
+			}
+			const overlayKeys = (event) => {
+				if (event.key !== 'Escape') return
+				event.preventDefault()
+				event.stopPropagation()
+				if (dialog.busy !== true) closeDialog()
+			}
+
+			return h(
+				'div',
+				{ className: 'dsh-file-tree-menu-overlay', onPointerDown: overlayPointer, onKeyDown: overlayKeys },
+				h(
+					'div',
+					{ className: 'dsh-file-tree-menu-dialog', role: 'dialog', 'aria-modal': 'true' },
+					h('p', { className: 'dsh-file-tree-menu-title' }, dialog.kind === 'rename' ? '重命名' : '删除'),
+					dialog.kind === 'rename'
+						? h('p', { className: 'dsh-file-tree-menu-text' }, '修改 ', h('strong', null, dialog.target.name), ' 的名称：')
+						: h(
+								'p',
+								{ className: 'dsh-file-tree-menu-text' },
+								'确定删除 ',
+								h('strong', null, dialog.target.name),
+								dialog.target.kind === 'directory' ? ' 及其全部内容吗？' : ' 吗？',
+								h('br'),
+								'这个操作不可撤销。'
+							),
+					dialog.kind === 'rename'
+						? h('input', {
+								ref: inputRef,
+								className: 'dsh-file-tree-menu-input',
+								value: dialog.value,
+								spellCheck: false,
+								autoComplete: 'off',
+								disabled: dialog.busy === true,
+								onChange: (event) => setDialog({ ...dialog, value: event.target.value, error: undefined }),
+								onKeyDown: (event) => {
+									if (event.key === 'Enter') {
+										event.preventDefault()
+										submitDialog()
+									}
+								}
+							})
+						: null,
+					dialog.error !== undefined ? h('p', { className: 'dsh-file-tree-menu-error' }, dialog.error) : null,
+					h(
+						'div',
+						{ className: 'dsh-file-tree-menu-buttons' },
+						h(
+							'button',
+							{
+								type: 'button',
+								className: 'dsh-file-tree-menu-button',
+								disabled: dialog.busy === true,
+								onClick: closeDialog
+							},
+							'取消'
+						),
+						h(
+							'button',
+							{
+								type: 'button',
+								className:
+									'dsh-file-tree-menu-button ' +
+									(dialog.kind === 'rename' ? 'dsh-file-tree-menu-primary' : 'dsh-file-tree-menu-danger'),
+								disabled: dialog.busy === true,
+								autoFocus: dialog.kind === 'delete',
+								onClick: submitDialog
+							},
+							dialog.busy === true ? '处理中…' : dialog.kind === 'rename' ? '确定' : '删除'
+						)
+					)
+				)
+			)
+		}
+		SessionMenuHost.displayName = 'DshFileMenuSessionHost'
+
+		/** Open the host's rename/delete dialog from a context-menu callback. */
+		const requestEditDialog = (kind, target) => {
+			if (typeof dialogHost.open !== 'function') throw new Error('对话框还没有准备好')
+			dialogHost.open({ kind, target, value: target.name, error: undefined, busy: false })
+		}
+
+		/** Register one contribution for both file and directory targets. */
+		const registerForRows = (ctx, contextMenus, id, order, resolve, label) => {
+			for (const kind of ['file', 'directory']) {
+				ctx.effect(
+					() =>
+						contextMenus.register({
+							id,
+							target: kind,
+							order,
+							resolve: (target, signal) => resolve(kind, target, signal)
+						}),
+					`file-menu: ${label} (${kind})`
+				)
+			}
+		}
+
+		/** Register the shared-context-menu contributions and their icons. */
+		const registerContextMenu = (ctx, slots, contextMenus) => {
+			registerForRows(
+				ctx,
+				contextMenus,
+				'file-tree-menu.chat',
+				40,
+				(kind, target, signal) => {
+					signal.throwIfAborted()
+					const full = { ...target, kind }
+					const mention = mentionOfTarget(ctx, full)
+					if (mention === undefined) return []
+					return [
+						{
+							id: 'addToConversation',
+							label: '添加到会话',
+							icon: { key: ICON_KEYS.chat },
+							failureLabel: '无法添加到会话',
+							run: () => addMentionToConversation(full, mention)
+						}
+					]
+				},
+				'add to conversation'
+			)
+
+			registerForRows(
+				ctx,
+				contextMenus,
+				'file-tree-menu.paths',
+				300,
+				async (kind, target, signal) => {
+					signal.throwIfAborted()
+					if (typeof target.path !== 'string' || target.path.length === 0) return []
+					const absolutePath = await absolutePathOfTarget(ctx, target, signal)
+					signal.throwIfAborted()
+					const relative = relativePathOfTarget(ctx, { ...target, kind })
+					const name = nameOf(target.path)
+					return [
+						{
+							id: 'copyName',
+							label: '复制名称',
+							icon: { key: ICON_KEYS.copy },
+							separatorBefore: true,
+							failureLabel: '复制失败',
+							run: () => copyAndNotify(name, `「${name}」`, '复制失败')
+						},
+						{
+							id: 'copyRelative',
+							label: '复制相对路径',
+							icon: { key: ICON_KEYS.path },
+							disabled: relative === undefined || relative.length === 0,
+							failureLabel: '复制失败',
+							run: () =>
+								relative === undefined || relative.length === 0
+									? Promise.reject(new Error('这个路径不在工作区里'))
+									: copyAndNotify(relative, `相对路径「${relative}」`, '复制失败')
+						},
+						{
+							id: 'copyAbsolute',
+							label: '复制绝对路径',
+							icon: { key: ICON_KEYS.path },
+							disabled: absolutePath === undefined,
+							failureLabel: '复制失败',
+							run: () =>
+								absolutePath === undefined
+									? Promise.reject(new Error('宿主没有给出绝对路径'))
+									: copyAndNotify(absolutePath, `绝对路径「${absolutePath}」`, '复制失败')
+						}
+					]
+				},
+				'path copying'
+			)
+
+			registerForRows(
+				ctx,
+				contextMenus,
+				'file-tree-menu.edit',
+				400,
+				async (kind, target, signal) => {
+					signal.throwIfAborted()
+					if (typeof target.path !== 'string' || target.path.length === 0) return []
+					const absolutePath = await absolutePathOfTarget(ctx, target, signal)
+					signal.throwIfAborted()
+					const relative = relativePathOfTarget(ctx, { ...target, kind })
+					if (absolutePath === undefined || relative === undefined || relative.length === 0) return []
+					const dialogTarget = {
+						kind,
+						name: nameOf(absolutePath),
+						path: absolutePath,
+						sessionId: target.sessionId
+					}
+					return [
+						{
+							id: 'rename',
+							label: '重命名…',
+							icon: { key: ICON_KEYS.edit },
+							separatorBefore: true,
+							failureLabel: '重命名失败',
+							run: () => requestEditDialog('rename', dialogTarget)
+						},
+						{
+							id: 'delete',
+							label: '删除…',
+							icon: { key: ICON_KEYS.trash },
+							danger: true,
+							failureLabel: '删除失败',
+							run: () => requestEditDialog('delete', dialogTarget)
+						}
+					]
+				},
+				'rename and delete'
+			)
+
+			const icons = [
+				[ICON_KEYS.chat, chatIcon],
+				[ICON_KEYS.copy, copyIcon],
+				[ICON_KEYS.path, pathIcon],
+				[ICON_KEYS.edit, editIcon],
+				[ICON_KEYS.trash, trashIcon]
+			]
+			try {
+				ctx.effect(() => {
+					const disposers = icons.map(([key, Icon]) =>
+						slots.inject(MENU_ICON_SLOT, () =>
+							slots.register({ name: MENU_ICON_SLOT, key }, Icon)
+						)
+					)
+					return () => {
+						for (const dispose of disposers) {
+							try {
+								dispose()
+							} catch {}
+						}
+					}
+				}, 'file-menu: context-menu icons')
+			} catch (error) {
+				warn('context-menu icon slot unavailable', error)
+			}
+		}
+
+		/* ------------------------------------------------------------------ */
 		/* Registration                                                        */
 		/* ------------------------------------------------------------------ */
 
 		const inject = ['slots']
+
+		/**
+		 * Register the composer host that owns the Session's `inputActions` and the
+		 * rename/delete dialogs. Both modes register it: a build whose
+		 * `contextMenus` service arrives after this plugin applied still opens its
+		 * dialogs through the same host.
+		 */
+		const registerComposerHost = (ctx, slots) => {
+			try {
+				return ctx.effect(
+					() =>
+						slots.inject(COMPOSER_SLOT, () =>
+							slots.register(
+								{ name: COMPOSER_SLOT, id: 'file-menu', order: 1000 },
+								SessionMenuHost
+							)
+						),
+					'file-menu: composer face capture'
+				)
+			} catch (error) {
+				warn('conversation input dock unavailable', error)
+				return undefined
+			}
+		}
 
 		function apply(ctx) {
 			try {
@@ -683,28 +1157,73 @@ window.__ModuleLoader__.load({
 					warn('slots service unavailable; plugin inactive')
 					return
 				}
-				if (typeof Menu !== 'function') {
-					warn('primitives.Menu unavailable; plugin inactive')
-					return
-				}
 				installStyles()
 
-				ctx.effect(
-					() =>
-						slots.inject(ACTIONS_SLOT, () =>
-							slots.register(
-								{ name: ACTIONS_SLOT, id: 'file-menu', order: 100 },
-								(props) => h(FileMenuBridge, { ...props, ctx })
-							)
-						),
-					'file-menu: workspace file context menu'
-				)
+				const contextMenus = serviceOf(ctx, 'contextMenus')
+				const sharedMenu = contextMenus !== undefined && typeof contextMenus.register === 'function'
+				let mode = sharedMenu ? 'context-menu' : 'dom-menu'
+
+				registerComposerHost(ctx, slots)
+
+				/** The legacy listener, until the shared menu replaces it. */
+				let legacyMenu
+
+				/** Contribute to the shared menu, dropping the legacy listener it supersedes. */
+				const useSharedMenu = (service) => {
+					menuService = service
+					registerContextMenu(ctx, slots, service)
+					mode = 'context-menu'
+					if (typeof legacyMenu === 'function') {
+						try {
+							legacyMenu()
+						} catch (error) {
+							warn('legacy menu removal failed', error)
+						}
+						legacyMenu = undefined
+					}
+					if (typeof globalThis.__DSH_FILE_MENU__ === 'object' && globalThis.__DSH_FILE_MENU__ !== null) {
+						globalThis.__DSH_FILE_MENU__.mode = mode
+					}
+				}
+
+				if (sharedMenu) {
+					useSharedMenu(contextMenus)
+				} else {
+					if (typeof Menu !== 'function') {
+						warn('primitives.Menu unavailable; plugin inactive')
+						return
+					}
+					legacyMenu = ctx.effect(
+						() =>
+							slots.inject(ACTIONS_SLOT, () =>
+								slots.register(
+									{ name: ACTIONS_SLOT, id: 'file-menu', order: 100 },
+									(props) => h(FileMenuBridge, { ...props, ctx })
+								)
+							),
+						'file-menu: workspace file context menu'
+					)
+					// A 0.2.2 build may provide `contextMenus` after this plugin applies.
+					// Upgrade when it does instead of hiding behind the DOM menu for the
+					// whole page lifetime.
+					try {
+						if (typeof ctx.inject === 'function') {
+							ctx.inject(['contextMenus'], (scoped) => {
+								const service = serviceOf(scoped, 'contextMenus') ?? serviceOf(ctx, 'contextMenus')
+								if (service !== undefined && typeof service.register === 'function') useSharedMenu(service)
+							})
+						}
+					} catch (error) {
+						warn('contextMenus never arrived; keeping the DOM menu', error)
+					}
+				}
 
 				if (typeof window !== 'undefined') window.__DSH_FILE_MENU_APPLIED__ = true
 
 				// Diagnostics: the same helpers the menu uses, for a console check.
 				globalThis.__DSH_FILE_MENU__ = {
-					version: '0.1.0',
+					version: '0.2.0',
+					mode,
 					reveal: (path) => revealPath(ctx, path),
 					formatMention,
 					relativeTo,
@@ -719,7 +1238,7 @@ window.__ModuleLoader__.load({
 			name: 'file-menu',
 			inject,
 			apply,
-			__internals: { formatMention, nameOf, normalizePath, relativeTo }
+			__internals: { formatMention, nameOf, normalizePath, relativeTo, isAbsolutePath, composerFaces }
 		}
 	}
 })

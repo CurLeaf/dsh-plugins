@@ -87,10 +87,10 @@ test('entry names survive both separator spellings', async () => {
 test('apply() registers the bridge into the files-tab header slot', async () => {
 	const module = await loadBundle()
 	const registrations = []
-	let injectedSlot
+	const injectedSlots = []
 	const slots = {
 		inject(slot, factory) {
-			injectedSlot = slot
+			injectedSlots.push(slot)
 			const dispose = factory()
 			return () => dispose()
 		},
@@ -113,12 +113,68 @@ test('apply() registers the bridge into the files-tab header slot', async () => 
 	} finally {
 		globalThis.document = previousDocument
 	}
-	assert.equal(injectedSlot, 'sidebar.right.tab.files.actions')
-	assert.equal(registrations.length, 1)
-	assert.equal(registrations[0].options.name, 'sidebar.right.tab.files.actions')
-	assert.equal(registrations[0].options.id, 'file-menu')
-	assert.equal(typeof registrations[0].component, 'function')
-	assert.equal(effects.length, 1, 'the slot injection is owned by an effect')
+	assert.deepEqual(injectedSlots, ['conversation.input.dock', 'sidebar.right.tab.files.actions'])
+	const bridge = registrations.find((entry) => entry.options.name === 'sidebar.right.tab.files.actions')
+	assert.ok(bridge, 'the legacy menu owns the files-tab header slot')
+	assert.equal(bridge.options.id, 'file-menu')
+	assert.equal(typeof bridge.component, 'function')
+	const composer = registrations.find((entry) => entry.options.name === 'conversation.input.dock')
+	assert.ok(composer, 'the dialog host rides the composer dock in both modes')
+	assert.equal(effects.length, 2, 'both slot injections are owned by effects')
+})
+
+test('a contextMenus service that arrives after apply() replaces the DOM menu', async () => {
+	const module = await loadBundle()
+	const registered = []
+	const removed = []
+	let deferred
+	const slots = {
+		inject(slot, factory) {
+			const dispose = factory()
+			const removal = () => {
+				removed.push(slot)
+				if (typeof dispose === 'function') dispose()
+			}
+			return removal
+		},
+		register(options) {
+			registered.push(options.name)
+			return () => {}
+		}
+	}
+	const ctx = {
+		get: (name) => (name === 'slots' ? slots : undefined),
+		effect: (factory) => factory(),
+		inject: (deps, callback) => {
+			assert.deepEqual(deps, ['contextMenus'])
+			deferred = callback
+		}
+	}
+	const previousDocument = globalThis.document
+	globalThis.document = undefined
+	try {
+		module.apply(ctx)
+	} finally {
+		globalThis.document = previousDocument
+	}
+	assert.deepEqual(registered, ['conversation.input.dock', 'sidebar.right.tab.files.actions'])
+	assert.equal(globalThis.__DSH_FILE_MENU__.mode, 'dom-menu')
+
+	const providers = new Map()
+	const contextMenus = {
+		register(input) {
+			providers.set(`${input.target}/${input.id}`, input)
+			return () => providers.delete(`${input.target}/${input.id}`)
+		}
+	}
+	assert.equal(typeof deferred, 'function', 'the plugin asks for a late provider')
+	deferred({ get: (name) => (name === 'contextMenus' ? contextMenus : undefined) })
+
+	assert.equal(globalThis.__DSH_FILE_MENU__.mode, 'context-menu')
+	assert.deepEqual(removed, ['sidebar.right.tab.files.actions'], 'the DOM listener is gone')
+	for (const kind of ['file', 'directory']) {
+		assert.ok(providers.has(`${kind}/file-tree-menu.edit`), `${kind} rename/delete registered late`)
+	}
 })
 
 test('apply() is inert without a slots service', async () => {
