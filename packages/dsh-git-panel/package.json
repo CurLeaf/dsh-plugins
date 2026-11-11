@@ -1,6 +1,6 @@
 {
   "name": "@qzsy/dsh-git-panel",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A Git section for the right Sidebar: workspace changes, a commit box, stage/discard, a diff preview tab, and a commit graph — modelled on the Git module of the local Cursor IDE.",
   "type": "module",
   "main": "./lib/index.js",
@@ -26,13 +26,15 @@
     "lib",
     "cordis.patch.yml",
     "README.md",
+    "THIRD_PARTY_NOTICES.md",
     "LICENSE"
   ],
   "engines": {
     "node": ">=20.9.0"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "icons": "node scripts/build-file-icons.mjs"
   },
   "license": "MIT",
   "author": "curleaf",

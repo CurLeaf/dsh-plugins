@@ -33,8 +33,10 @@
  * @module dsh-git-panel
  */
 import { spawn } from 'node:child_process'
+import { existsSync, realpathSync } from 'node:fs'
 import { readFile, rm, stat } from 'node:fs/promises'
-import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /** Stable Loader identity. */
 export const name = 'git-panel'
@@ -59,6 +61,30 @@ const MAX_GRAPH_LIMIT = 400
 
 /** Value reads stay fresh for the same caller inside this window (one render pass). */
 const STATUS_TTL_MS = 1200
+
+/**
+ * The Git work tree this package itself lives in, if any.
+ *
+ * A Sidebar panel is scoped to the Session's working directory, but a Session
+ * parked outside a repository (a workspace root, say) has nothing to show while
+ * the user is editing this very plugin. The browser half asks for this root and
+ * falls back to it when the Session directory answers `repo: false`. Resolved
+ * once at load: a `link:` install walks up to the checkout, an npm install
+ * stops somewhere under `node_modules` with no `.git` above it.
+ */
+const PLUGIN_REPO_ROOT = (() => {
+	try {
+		let directory = dirname(realpathSync(fileURLToPath(import.meta.url)))
+		while (true) {
+			if (existsSync(join(directory, '.git'))) return directory
+			const parent = dirname(directory)
+			if (parent === directory) return undefined
+			directory = parent
+		}
+	} catch {
+		return undefined
+	}
+})()
 
 /** `path -> { at, value }` for `status` only: the panel polls it. */
 const statusCache = new Map()
@@ -223,20 +249,19 @@ async function mustGit(cwd, args, options = {}) {
  * @returns {Promise<object>} `{ repo: false }` or the repository facts.
  */
 async function locateRepository(cwd, signal) {
-	const inside = await runGit(cwd, ['rev-parse', '--is-inside-work-tree'], { signal })
-	if (inside.exitCode !== 0 || inside.stdout.trim() !== 'true') return { repo: false }
+	// One `rev-parse` answers all three questions in the order they were asked.
+	// The panel asks this on every poll, so three spawns became one: on macOS a
+	// spawn costs more than the answer. A bare repository prints `false` and then
+	// fails on `--show-toplevel`; the first line is what decides.
+	const probe = await runGit(cwd, ['rev-parse', '--is-inside-work-tree', '--show-toplevel', '--absolute-git-dir'], { signal })
+	const [inside, top, gitDir] = probe.stdout.split('\n').map((line) => line.trim())
+	if (inside !== 'true' || top === undefined || top === '') return { repo: false }
 
-	const top = await runGit(cwd, ['rev-parse', '--show-toplevel'], { signal })
-	if (top.exitCode !== 0) return { repo: false }
-	const root = top.stdout.trim()
-	if (root === '') return { repo: false }
-
-	const gitDir = await runGit(cwd, ['rev-parse', '--absolute-git-dir'], { signal })
 	return {
 		repo: true,
-		root,
-		gitDir: gitDir.exitCode === 0 ? gitDir.stdout.trim() : `${root}${sep}.git`,
-		name: root.split(/[\\/]/).filter(Boolean).pop() ?? root,
+		root: top,
+		gitDir: gitDir === undefined || gitDir === '' ? join(top, '.git') : gitDir,
+		name: top.split(/[\\/]/).filter(Boolean).pop() ?? top,
 	}
 }
 
@@ -430,13 +455,10 @@ export async function readStatus(cwd, signal, force = false) {
 	const repository = await locateRepository(cwd, signal)
 	if (repository.repo !== true) return rememberStatus(cwd, { repo: false, cwd })
 
-	const [status, stagedCounts, worktreeCounts, head, upstreamExists, mergeHead] = await Promise.all([
+	const [status, stagedCounts, worktreeCounts] = await Promise.all([
 		runGit(cwd, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all'], { signal }),
 		runGit(cwd, ['diff', '--cached', '--numstat', '-z'], { signal }),
 		runGit(cwd, ['diff', '--numstat', '-z'], { signal }),
-		runGit(cwd, ['rev-parse', '--short', 'HEAD'], { signal }),
-		runGit(cwd, ['rev-parse', '--verify', '--quiet', 'HEAD'], { signal }),
-		runGit(cwd, ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD'], { signal }),
 	])
 	if (status.exitCode !== 0) {
 		throw new PanelError('git-failed', status.stderr.trim() || 'git status failed')
@@ -445,6 +467,11 @@ export async function readStatus(cwd, signal, force = false) {
 	const parsed = parseStatus(status.stdout)
 	const staged = mergeCounts(parsed.staged, parseNumstat(stagedCounts.stdout))
 	const changes = mergeCounts(parsed.changes, parseNumstat(worktreeCounts.stdout))
+	// `--branch` already reports the checked-out object, so `rev-parse HEAD` and
+	// the MERGE_HEAD probe are gone: three fewer spawns on a route the panel
+	// hits every few seconds. An unborn HEAD is `(initial)` there.
+	const fullOid = typeof parsed.branch.oid === 'string' ? parsed.branch.oid : ''
+	const unborn = fullOid === '' || fullOid === '(initial)'
 
 	const payload = {
 		repo: true,
@@ -453,8 +480,8 @@ export async function readStatus(cwd, signal, force = false) {
 		name: repository.name,
 		branch: parsed.branch.head,
 		detached: parsed.branch.head === null,
-		oid: head.exitCode === 0 ? head.stdout.trim() : null,
-		unborn: upstreamExists.exitCode !== 0 && parsed.branch.oid === '',
+		oid: unborn ? null : fullOid.slice(0, 7),
+		unborn,
 		upstream: parsed.branch.upstream,
 		ahead: parsed.branch.ahead,
 		behind: parsed.branch.behind,
@@ -462,7 +489,7 @@ export async function readStatus(cwd, signal, force = false) {
 		changes,
 		untracked: parsed.untracked,
 		conflicts: parsed.conflicts,
-		merging: mergeHead.exitCode === 0,
+		merging: existsSync(join(repository.gitDir, 'MERGE_HEAD')),
 		counts: {
 			staged: staged.length,
 			changes: changes.length,
@@ -472,6 +499,31 @@ export async function readStatus(cwd, signal, force = false) {
 		generatedAt: Date.now(),
 	}
 	return rememberStatus(cwd, payload)
+}
+
+/**
+ * Attach the status a finished write caused.
+ *
+ * The panel used to answer every write with `{ ok: true }` and then ask for
+ * `status` again: two round trips, and a window where the branch chip and the
+ * ahead/behind counts still showed what the write had just replaced. Handing
+ * the fresh status back in the same response closes that window and halves the
+ * hand-offs on a checkout or a fetch.
+ *
+ * A status read that fails must not turn a finished write into an error — the
+ * write already happened, so the value stands on its own.
+ * @param {string} cwd - repository working directory.
+ * @param {AbortSignal} [signal] - request signal.
+ * @param {object} value - the action's own payload.
+ * @returns {Promise<object>} the payload, plus `status` when it could be read.
+ */
+async function settleStatus(cwd, signal, value) {
+	statusCache.delete(cwd)
+	try {
+		return { ...value, status: await readStatus(cwd, signal, true) }
+	} catch {
+		return value
+	}
 }
 
 /**
@@ -838,8 +890,7 @@ async function resolveConflict(cwd, request, signal) {
 		throw new PanelError('git-failed', checked.stderr.trim() || `git checkout --${mode} -- ${path} failed`)
 	}
 	await mustGit(cwd, ['add', '--', path], { signal, readOnly: false, timeoutMs: WRITE_TIMEOUT_MS })
-	statusCache.delete(cwd)
-	return { ok: true, action: 'resolve', mode, path }
+	return settleStatus(cwd, signal, { ok: true, action: 'resolve', mode, path })
 }
 
 /**
@@ -850,8 +901,7 @@ async function stage(cwd, request, signal) {
 	if (repository.repo !== true) throw new PanelError('no-repo', 'not a Git work tree')
 	const paths = containedPaths(repository, request.paths)
 	await mustGit(cwd, ['add', '-A', '--', ...paths], { signal, readOnly: false, timeoutMs: WRITE_TIMEOUT_MS })
-	statusCache.delete(cwd)
-	return { ok: true, action: 'stage', paths }
+	return settleStatus(cwd, signal, { ok: true, action: 'stage', paths })
 }
 
 /**
@@ -865,8 +915,7 @@ async function unstage(cwd, request, signal) {
 	if (reset.exitCode !== 0) {
 		await mustGit(cwd, ['reset', '-q', 'HEAD', '--', ...paths], { signal, readOnly: false, timeoutMs: WRITE_TIMEOUT_MS })
 	}
-	statusCache.delete(cwd)
-	return { ok: true, action: 'unstage', paths }
+	return settleStatus(cwd, signal, { ok: true, action: 'unstage', paths })
 }
 
 /**
@@ -926,8 +975,7 @@ async function discard(cwd, request, signal) {
 		}
 	}
 
-	statusCache.delete(cwd)
-	return { ok: true, action: 'discard', paths: restored, removed }
+	return settleStatus(cwd, signal, { ok: true, action: 'discard', paths: restored, removed })
 }
 
 /**
@@ -967,14 +1015,13 @@ async function commit(cwd, request, signal) {
 
 	const head = await runGit(cwd, ['rev-parse', '--short', 'HEAD'], { signal })
 	const branch = await runGit(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], { signal })
-	statusCache.delete(cwd)
-	return {
+	return settleStatus(cwd, signal, {
 		ok: true,
 		action: 'commit',
 		hash: head.exitCode === 0 ? head.stdout.trim() : null,
 		branch: branch.exitCode === 0 ? branch.stdout.trim() : null,
 		summary: result.stdout.trim(),
-	}
+	})
 }
 
 /** Undo the last commit but keep its content staged — the Git module's `undoCommit`. */
@@ -987,8 +1034,7 @@ async function undoCommit(cwd, request, signal) {
 	if (soft.exitCode !== 0) {
 		await mustGit(cwd, ['update-ref', '-d', 'HEAD'], { signal, readOnly: false, timeoutMs: WRITE_TIMEOUT_MS })
 	}
-	statusCache.delete(cwd)
-	return { ok: true, action: 'undoCommit' }
+	return settleStatus(cwd, signal, { ok: true, action: 'undoCommit' })
 }
 
 /** Network verbs. Each is one git command with its own timeout and honest stderr. */
@@ -1038,8 +1084,7 @@ async function network(cwd, request, signal) {
 		}
 	}
 
-	statusCache.delete(cwd)
-	return { ok: true, action: 'network', mode, steps: output }
+	return settleStatus(cwd, signal, { ok: true, action: 'network', mode, steps: output })
 }
 
 /**
@@ -1104,8 +1149,7 @@ async function checkout(cwd, request, signal) {
 	if (result.exitCode !== 0) {
 		throw new PanelError('checkout-failed', result.stderr.trim() || result.stdout.trim() || 'git checkout failed')
 	}
-	statusCache.delete(cwd)
-	return { ok: true, action: 'checkout', name: target }
+	return settleStatus(cwd, signal, { ok: true, action: 'checkout', name: target })
 }
 
 /** Stash the work tree (untracked included) or pop the newest entry. */
@@ -1119,8 +1163,7 @@ async function stash(cwd, request, signal) {
 	if (result.exitCode !== 0) {
 		throw new PanelError('stash-failed', result.stderr.trim() || result.stdout.trim() || 'git stash failed')
 	}
-	statusCache.delete(cwd)
-	return { ok: true, action: 'stash', mode: request.mode ?? 'push', summary: result.stdout.trim() }
+	return settleStatus(cwd, signal, { ok: true, action: 'stash', mode: request.mode ?? 'push', summary: result.stdout.trim() })
 }
 
 /* ------------------------------------------------------------------ */
@@ -1129,6 +1172,7 @@ async function stash(cwd, request, signal) {
 
 /** Every action this route accepts. */
 const ACTIONS = new Map([
+	['meta', 'read'],
 	['status', 'read'],
 	['graph', 'read'],
 	['diff', 'read'],
@@ -1157,6 +1201,9 @@ export async function perform(request, signal) {
 	}
 	const action = String(request.action ?? '')
 	if (!ACTIONS.has(action)) throw new PanelError('bad-action', `unknown action: ${action}`)
+	// `meta` is fixed for the lifetime of the process and takes no `cwd`: the
+	// browser asks for it before it knows where to point the panel.
+	if (action === 'meta') return { fallback: PLUGIN_REPO_ROOT }
 	const cwd = readCwd(request.cwd)
 
 	switch (action) {

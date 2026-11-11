@@ -10,15 +10,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import { existsSync, realpathSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { __internals, apply, perform } from '../lib/index.js'
 
 const { containedPath, parseDecorations, parseGraph, parseNumstat, parseRefList, parseStatus } = __internals
 
 const SIGNAL = new AbortController().signal
+/** The checkout these tests run from; the Host resolves the same root. */
+const REPO_ROOT = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..'))
 
 /**
  * Create one throwaway repository with an initial commit.
@@ -274,6 +278,62 @@ test('branches lists the current branch and checkout switches', async () => {
 	}
 })
 
+test('a checkout answers with the status it produced', async () => {
+	const dir = await repository()
+	try {
+		await execFileSync('git', ['-C', dir, 'branch', 'next'], { encoding: 'utf8' })
+		const checkedOut = await perform({ action: 'checkout', cwd: dir, name: 'next' }, SIGNAL)
+		// The panel paints the chip from this payload: no second round trip, and
+		// no frame where the old branch is still on screen.
+		assert.equal(checkedOut.status.branch, 'next')
+		assert.equal(checkedOut.status.detached, false)
+	} finally {
+		await rm(dir, { recursive: true, force: true })
+	}
+})
+
+test('a write answers with the status it produced', async () => {
+	const dir = await repository()
+	try {
+		await writeFile(join(dir, 'tracked.txt'), 'one\ntwo\n')
+		const staged = await perform({ action: 'stage', cwd: dir, paths: ['tracked.txt'] }, SIGNAL)
+		assert.equal(staged.status.counts.staged, 1)
+		assert.equal(staged.status.counts.changes, 0)
+	} finally {
+		await rm(dir, { recursive: true, force: true })
+	}
+})
+
+test('status reads an unborn HEAD as no commit yet', async () => {
+	const dir = await mkdtemp(join(tmpdir(), 'dsh-git-panel-empty-'))
+	try {
+		execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'], { encoding: 'utf8' })
+		const status = await perform({ action: 'status', cwd: dir }, SIGNAL)
+		assert.equal(status.repo, true)
+		assert.equal(status.branch, 'main')
+		assert.equal(status.unborn, true)
+		assert.equal(status.oid, null)
+		assert.equal(status.detached, false)
+	} finally {
+		await rm(dir, { recursive: true, force: true })
+	}
+})
+
+test('status reads a detached HEAD as its short commit', async () => {
+	const dir = await repository()
+	try {
+		const head = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+		execFileSync('git', ['-C', dir, 'checkout', '-q', '--detach', head], { encoding: 'utf8' })
+		const status = await perform({ action: 'status', cwd: dir }, SIGNAL)
+		assert.equal(status.detached, true)
+		assert.equal(status.branch, null)
+		assert.equal(status.oid, head.slice(0, 7))
+		assert.equal(status.unborn, false)
+	} finally {
+		await rm(dir, { recursive: true, force: true })
+	}
+})
+
 test('undoCommit keeps the content staged', async () => {
 	const dir = await repository()
 	try {
@@ -317,6 +377,13 @@ test('a directory outside any repository answers repo: false instead of failing'
 	} finally {
 		await rm(dir, { recursive: true, force: true })
 	}
+})
+
+test('meta names the checkout this package itself lives in', async () => {
+	const value = await perform({ action: 'meta' }, SIGNAL)
+	assert.equal(value.fallback, REPO_ROOT)
+	assert.ok(isAbsolute(value.fallback))
+	assert.ok(existsSync(join(value.fallback, '.git')), 'the fallback root is a work tree')
 })
 
 test('the route refuses what it does not know', async () => {

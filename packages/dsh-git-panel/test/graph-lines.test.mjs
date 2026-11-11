@@ -19,8 +19,20 @@ const CLIENT_PATH = join(here, '..', 'lib', 'client.js')
 
 function stubReact() {
 	const createElement = (type, props, ...children) => ({ type, props: props ?? {}, children })
+	/** Enough of React.Component for the tab error boundary to load. */
+	class Component {
+		constructor(props) {
+			this.props = props
+			this.state = {}
+		}
+
+		setState(next) {
+			this.state = { ...this.state, ...(typeof next === 'function' ? next(this.state) : next) }
+		}
+	}
 	return {
 		createElement,
+		Component,
 		Fragment: Symbol('Fragment'),
 		useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
 		useEffect: () => {},
