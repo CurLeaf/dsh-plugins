@@ -19,7 +19,7 @@
  * @module dsh-rewind
  */
 
-import { readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { RewindStore, resolveConfig } from './engine.js'
@@ -78,6 +78,8 @@ export function apply(ctx) {
 
 	/** Live sessions by id, for parent lookup and the `resolve` fallback. */
 	const live = new Map()
+	/** Last activity time per session, newest wins for the `current` lookup. */
+	const seen = new Map()
 	/** Root session of a subagent run. */
 	const roots = new WeakMap()
 	/** Turn currently open per root session. */
@@ -125,6 +127,7 @@ export function apply(ctx) {
 		const id = idOf(session)
 		if (id === undefined) return undefined
 		live.set(id, session)
+		seen.set(id, Date.now())
 		const base = session.header?.cwd
 		if (typeof base === 'string' && base !== '') void store.ensureSession(id, base).catch(() => {})
 		if (!turns.has(id)) {
@@ -224,6 +227,28 @@ export function apply(ctx) {
 	}
 
 	/**
+	 * Append one line to the access probe. The probe answers a question nothing
+	 * else can: did the browser half load at all (`hello`), and did a turn footer
+	 * mount (`list`)? It is capped so a long-lived profile cannot grow it.
+	 *
+	 * @param {string} action - action name the browser asked for.
+	 * @param {string | undefined} sessionId - session it named, when any.
+	 */
+	const probe = (action, sessionId, step) => {
+		try {
+			const path = join(root, 'access.log')
+			try {
+				if (statSync(path).size > 256 * 1024) return
+			} catch {
+				/* first line */
+			}
+			appendFileSync(path, `${new Date().toISOString()} ${action} ${sessionId ?? '-'} ${step ?? '-'}\n`, { mode: 0o600 })
+		} catch {
+			/* a probe must never break a request */
+		}
+	}
+
+	/**
 	 * The one action vocabulary behind `POST /api/rewind`.
 	 *
 	 * @param {object} payload - validated request body.
@@ -231,6 +256,15 @@ export function apply(ctx) {
 	 */
 	const perform = async (payload) => {
 		const action = payload?.action
+		probe(String(action), payload?.sessionId, payload?.step)
+		if (action === 'hello') return { ok: true, version: 1 }
+		if (action === 'current') {
+			let newest
+			for (const [id, at] of seen) {
+				if (newest === undefined || at > newest.at) newest = { id, at }
+			}
+			return { sessionId: newest?.id ?? null }
+		}
 		if (action === 'resolve') {
 			const seq = Number(payload.seq)
 			if (!Number.isInteger(seq)) throw new RouteError('bad-request', 'seq must be an integer')
@@ -296,6 +330,33 @@ export function apply(ctx) {
 			'dsh-rewind: /api/rewind route',
 		)
 	})
+
+	/**
+	 * Record what the host published into the browser module graph. This answers
+	 * "is the client half available at all" without opening the browser: if the
+	 * id is here and the bundle path exists, only a page load can be missing.
+	 */
+	const dumpClientGraph = () => {
+		try {
+			const registry = ctx.get('clientModules')
+			const ids = registry?.table instanceof Map ? [...registry.table.keys()] : []
+			const own = '@qzsy/dsh-rewind'
+			let bundle
+			try {
+				bundle = registry?.clientPath?.(own)
+			} catch {
+				bundle = undefined
+			}
+			writeFileSync(
+				join(root, 'client-graph.json'),
+				`${JSON.stringify({ at: new Date().toISOString(), published: ids.includes(own), ids, bundle }, null, 2)}\n`,
+				{ mode: 0o600 },
+			)
+		} catch (error) {
+			ctx.logger.warn(`dsh-rewind: client graph probe failed: ${error instanceof Error ? error.message : String(error)}`)
+		}
+	}
+	setTimeout(dumpClientGraph, 1500)
 
 	/* Housekeeping: one quiet pass a minute after mount, then every six hours. */
 	const maintain = () => {
