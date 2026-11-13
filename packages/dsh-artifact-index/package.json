@@ -1,6 +1,6 @@
 {
   "name": "@qzsy/dsh-artifact-index",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Index a session's image artifacts into <project>/.dsh/artifacts as zero-cost hardlinks, with /artifacts list|backfill|clear|gc and an end-of-turn cleanup reminder.",
   "type": "module",
   "main": "./lib/index.js",
