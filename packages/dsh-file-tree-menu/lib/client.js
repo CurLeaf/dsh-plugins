@@ -721,6 +721,11 @@ window.__ModuleLoader__.load({
 							align: 'start',
 							side: 'bottom',
 							listClassName: 'dsh-file-tree-menu-list',
+							/* DSH 0.2.2 起 Menu 不再接受 getAnchorRect：点触发的菜单改用
+							 * anchorPoint（与 event.clientX/clientY 同一套视口坐标）。
+							 * 两个都传：新 Host 用 anchorPoint，旧 Host 仍认 getAnchorRect，
+							 * 各自忽略对方不认识的 prop。 */
+							anchorPoint: { x: menu.x, y: menu.y },
 							getAnchorRect: () => ({ left: menu.x, top: menu.y, right: menu.x, bottom: menu.y, width: 0, height: 0 }),
 							onClose: closeMenu,
 							items,

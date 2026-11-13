@@ -36,10 +36,11 @@ dsh plugin --profile desktop add link:~/WorkSpace/dsh-plugins/packages/dsh-file-
 
 然后**退出并重新打开 DeepSeek Harness**。新插件要重新读一次 profile，窗口刷新（Cmd+R）不够。
 
-已经装过旧版（profile 里是 `link:` 到本目录）的，更新的是同一份文件；同样退出重开 DSH 即可加载 0.2.0。升级后：
+已经装过旧版（profile 里是 `link:` 到本目录）的，更新的是同一份文件；同样退出重开 DSH 即可加载 0.2.1。升级后：
 
 - 新版本走共享右键菜单，「添加到会话」在文件页和预览旁边都在；
 - 旧版本（没有 `contextMenus`）仍走原来的 DOM 菜单；
+- 回退菜单同时传 `anchorPoint` 与 `getAnchorRect`：0.2.2 起 `Menu` 用前者定位点触发菜单，旧 Host 仍认后者，升级前后菜单都挂在鼠标位置；
 - 两个写操作还是同一条宿主路由，不需要改配置。
 
 ## 为什么还需要宿主半边

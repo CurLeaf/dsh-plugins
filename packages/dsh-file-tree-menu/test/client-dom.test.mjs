@@ -115,7 +115,13 @@ function MenuStandIn(props) {
 	const items = Array.isArray(props.items) ? props.items : []
 	return React.createElement(
 		'div',
-		{ 'data-test-menu': '', 'data-open': String(props.open === true) },
+		{
+			'data-test-menu': '',
+			'data-open': String(props.open === true),
+			'data-anchor-x': props.anchorPoint === undefined ? '' : String(props.anchorPoint.x),
+			'data-anchor-y': props.anchorPoint === undefined ? '' : String(props.anchorPoint.y),
+			'data-has-anchor-rect': String(typeof props.getAnchorRect === 'function')
+		},
 		items.map((item) =>
 			item.type === 'separator'
 				? React.createElement('hr', { key: item.id, 'data-menu-separator': '' })
@@ -256,6 +262,11 @@ test('contextmenu on a file row opens the workspace menu', async () => {
 	const ids = [...menu.querySelectorAll('[data-menu-item]')].map((node) => node.getAttribute('data-menu-item'))
 	assert.deepEqual(ids, ['add-to-chat', 'reveal', 'copy-name', 'copy-relative', 'copy-absolute', 'rename', 'delete'])
 	assert.equal(menu.querySelectorAll('[data-menu-separator]').length, 2)
+	// DSH 0.2.2 起 Menu 用 anchorPoint 定位点触发菜单；旧 Host 仍认 getAnchorRect。
+	// 两个 prop 都要在，升级前后菜单都挂在鼠标位置。
+	assert.equal(menu.getAttribute('data-anchor-x'), '140')
+	assert.equal(menu.getAttribute('data-anchor-y'), '96')
+	assert.equal(menu.getAttribute('data-has-anchor-rect'), 'true')
 	assert.equal(menu.querySelector('[data-menu-item="delete"]').getAttribute('data-danger'), 'true')
 	// The reveal label follows the probed Host platform (finder → 访达).
 	await flush()

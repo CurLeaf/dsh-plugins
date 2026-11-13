@@ -1,6 +1,6 @@
 {
   "name": "dsh-file-tree-menu",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Right-click actions for the workspace file tree: add a file or directory to the conversation, copy the name / relative path / absolute path, rename, and delete. Uses the shared DSH context menu, with a DOM fallback on older builds.",
   "type": "module",
   "main": "./lib/index.js",
