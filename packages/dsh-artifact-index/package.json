@@ -23,7 +23,8 @@
     "locale/*.json",
     "icon.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts"
   ],
   "engines": {
     "node": ">=22.15.0"
