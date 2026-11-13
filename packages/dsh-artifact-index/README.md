@@ -45,6 +45,14 @@ DSH 的会话日志是**追加写入的多帧 zstd**。Node 自带的 `zlib.zstd
 
 本地改完源码同步进 profile：`pnpm sync:profile`（默认 `~/.dsh/profiles/web`，可用 `DSH_PROFILE_DIR` 覆盖），重启 DSH 生效。
 
+不想等重启，可以走终端 CLI（直接跑本包源码，改完即生效）：
+
+```sh
+pnpm gc                      # 空跑：扫日志 → 算孤儿 → 出报告
+pnpm gc --yes                # 真删（默认 3 天保护期）
+pnpm gc --yes --min-age-days=7   # 换保护期
+```
+
 ## 配置
 
 在 profile 的 patch 层覆盖这一行的 `config` 即可（缺省值如下）：

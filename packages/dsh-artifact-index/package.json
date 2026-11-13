@@ -30,7 +30,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "sync:profile": "node scripts/sync-to-profile.mjs"
+    "sync:profile": "node scripts/sync-to-profile.mjs",
+    "gc": "node scripts/gc-cli.mjs"
   },
   "keywords": [
     "dsh",
