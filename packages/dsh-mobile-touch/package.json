@@ -1,0 +1,33 @@
+{
+  "name": "dsh-mobile-touch",
+  "version": "0.1.0",
+  "description": "Mobile ergonomics patch for the DSH web shell: expands touch targets to >=44px without changing visuals, fixes placeholder contrast, and keeps the composer row from overflowing on narrow screens.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "dsh-lazy-mcp",
+  "version": "0.1.0",
+  "description": "On-demand MCP tool groups for DSH: keep one small load_tool_group tool resident and mount a server's tools only when a task needs them.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "README.md"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "test": "node test/smoke.mjs"
+  }
+}
