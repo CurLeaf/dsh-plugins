@@ -35,9 +35,10 @@ import {
 } from './store.js'
 import {
   attachmentsRootPath,
-  collectReferencedIds,
+  gcSafetyBlockReason,
   planOrphans,
   scanObjects,
+  scanSessionReferences,
   sessionsRootPath,
   sweepOrphans,
 } from './gc.js'
@@ -55,6 +56,7 @@ const USAGE = [
   '/artifacts clear      标记本会话产物为「可清退」（不删文件）',
   '/artifacts gc         报告可回收的对象（不删）',
   '/artifacts gc --yes   真删：未被任何会话引用且超过保护期的对象',
+  '/artifacts gc --yes --force  引用扫描异常时仍强制删除（危险）',
 ].join('\n')
 
 /** 默认配置；与 cordis.patch.yml 里插件的 `config` 同形。 */
@@ -332,7 +334,13 @@ export function apply(ctx, config) {
       case 'clear':
         return clearResult(session, root, indexPath)
       case 'gc':
-        return gcResult({ root, indexPath, yes: flags.includes('--yes'), signal })
+        return gcResult({
+          root,
+          indexPath,
+          yes: flags.includes('--yes'),
+          force: flags.includes('--force'),
+          signal,
+        })
       default:
         return { kind: 'error', text: `未知子命令「${verb}」\n${USAGE}` }
     }
@@ -385,19 +393,35 @@ export function apply(ctx, config) {
     }
   }
 
-  /** @param {{ root: string, indexPath: string, yes: boolean, signal?: AbortSignal }} input */
-  async function gcResult({ root, indexPath, yes, signal }) {
-    const referenced = await collectReferencedIds({ signal })
+  /** @param {{ root: string, indexPath: string, yes: boolean, force?: boolean, signal?: AbortSignal }} input */
+  async function gcResult({ root, indexPath, yes, force = false, signal }) {
+    const scan = await scanSessionReferences({ signal })
+    const referenced = scan.ids
     const objects = await scanObjects({ root: attachmentsRootPath() })
     const plan = planOrphans({
       objects,
       referenced,
       minAgeMs: options.gc.minAgeDays * 86400000,
     })
+    const scanLine = `引用扫描：${scan.files} 个会话日志，成功解压 ${scan.decoded}（走 zstd CLI ${scan.viaCli}），失败 ${scan.failed}，只读到首帧 ${scan.lossy}，命中 ${referenced.size} 个 id`
+
+    // 引用扫描不可信时，绝不能按「没被引用」删东西：宁可拒绝，也不误删。
+    const blockReason = gcSafetyBlockReason({ scan, plan, force })
+    if (yes && blockReason !== null) {
+      return {
+        kind: 'error',
+        text: [
+          `已拒绝删除：${blockReason}。`,
+          scanLine,
+          '按当前结果删会把仍在用的附件当孤儿。先确认 `zstd` 命令可用（DSH 日志是多帧追加，必须用 CLI 解），修好后重跑 /artifacts gc。',
+          '确实要按当前结果强删：/artifacts gc --yes --force',
+        ].join('\n'),
+      }
+    }
     if (plan.orphans.length === 0) {
       return {
         kind: 'success',
-        text: `扫描 ${plan.scanned} 个对象、${referenced.size} 个被引用 id：没有可回收的对象（未过 ${options.gc.minAgeDays} 天保护期的 ${plan.fresh} 个）。`,
+        text: `扫描 ${plan.scanned} 个对象：没有可回收的对象（未过 ${options.gc.minAgeDays} 天保护期的 ${plan.fresh} 个）。\n${scanLine}`,
       }
     }
     if (!yes) {
@@ -406,6 +430,7 @@ export function apply(ctx, config) {
         kind: 'success',
         text: [
           `可回收：${plan.orphans.length} 个对象 / ${formatBytes(plan.bytes)}（对象库共 ${plan.scanned} 个）`,
+          scanLine,
           '最大的 5 个：',
           ...worst.map((object) => `  ${object.id.slice(0, 12)}…  ${formatBytes(object.bytes)}`),
           '这是空跑，没有删任何东西。确认后运行：/artifacts gc --yes',
@@ -416,7 +441,7 @@ export function apply(ctx, config) {
     const swept = await sweepOrphans(plan.orphans, { signal })
     return {
       kind: 'success',
-      text: `已删除 ${swept.deleted} 个对象，回收 ${formatBytes(swept.bytes)}${swept.failed > 0 ? `（${swept.failed} 个删除失败）` : ''}。`,
+      text: `已删除 ${swept.deleted} 个对象，回收 ${formatBytes(swept.bytes)}${swept.failed > 0 ? `（${swept.failed} 个删除失败）` : ''}。\n${scanLine}`,
     }
   }
 

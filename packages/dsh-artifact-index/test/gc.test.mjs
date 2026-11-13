@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -8,8 +9,10 @@ import zlib from 'node:zlib'
 import {
   collectReferencedIds,
   findSessionLogs,
+  gcSafetyBlockReason,
   planOrphans,
   scanObjects,
+  scanSessionReferences,
   sweepOrphans,
 } from '../lib/gc.js'
 
@@ -131,4 +134,101 @@ test('sweepOrphans 统计删除结果并忽略已消失的文件', async () => {
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+/** 多帧日志：模拟 DSH 追加写入（每行一帧）。 */
+function multiFrameLog(lines) {
+  return Buffer.concat(lines.map((line) => zlib.zstdCompressSync(Buffer.from(`${line}\n`))))
+}
+
+const HAS_ZSTD_CLI = (() => {
+  try {
+    return spawnSync('zstd', ['--version'], { stdio: 'ignore' }).status === 0
+  } catch {
+    return false
+  }
+})()
+
+test(
+  'scanSessionReferences：多帧日志用 zstd CLI 全量解压，引用一条不漏',
+  { skip: HAS_ZSTD ? false : '当前 Node 没有 zstd' },
+  async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'artifact-gc-multi-'))
+    const first = id('a')
+    const second = id('b')
+    try {
+      await mkdir(path.join(root, 'p', 's1'), { recursive: true })
+      await writeFile(
+        path.join(root, 'p', 's1', 'session.v4.jsonl.zstd'),
+        multiFrameLog([
+          `{"type":"session"}`,
+          `{"image":"sha256:${first}"}`,
+          `{"image":"sha256:${second}"}`,
+        ]),
+      )
+      const scan = await scanSessionReferences({ root })
+      assert.equal(scan.files, 1)
+      assert.equal(scan.failed, 0)
+      if (HAS_ZSTD_CLI) {
+        assert.equal(scan.lossy, 0)
+        assert.ok(scan.ids.has(first))
+        assert.ok(scan.ids.has(second), '第二帧的引用不能丢')
+      } else {
+        // 没有 CLI 时必须自曝其短，而不是假装扫全了
+        assert.equal(scan.lossy, 1)
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  },
+)
+
+test(
+  'scanSessionReferences：zstd CLI 不可用时把 lossy 报出来',
+  { skip: HAS_ZSTD ? false : '当前 Node 没有 zstd' },
+  async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'artifact-gc-nocli-'))
+    const saved = process.env.PATH
+    try {
+      await mkdir(path.join(root, 'p', 's1'), { recursive: true })
+      await writeFile(
+        path.join(root, 'p', 's1', 'session.v4.jsonl.zstd'),
+        multiFrameLog([`{"a":"sha256:${id('a')}"}`, `{"b":"sha256:${id('b')}"}`]),
+      )
+      process.env.PATH = ''
+      const scan = await scanSessionReferences({ root })
+      assert.equal(scan.viaCli, 0)
+      assert.equal(scan.lossy, 1, '多帧但只解首帧，必须标记 lossy')
+      assert.equal(gcSafetyBlockReason({ scan, plan: { orphans: [{}] } }) !== null, true)
+    } finally {
+      process.env.PATH = saved
+      await rm(root, { recursive: true, force: true })
+    }
+  },
+)
+
+test('gcSafetyBlockReason：失败/残缺/0 命中都拒绝，--force 才放行', () => {
+  const okScan = { files: 3, failed: 0, lossy: 0, ids: new Set(['x']) }
+  assert.equal(gcSafetyBlockReason({ scan: okScan, plan: { orphans: [{}] } }), null)
+  assert.match(
+    gcSafetyBlockReason({ scan: { ...okScan, failed: 1 }, plan: { orphans: [{}] } }),
+    /引用扫描不完整/,
+  )
+  assert.match(
+    gcSafetyBlockReason({ scan: { ...okScan, lossy: 1 }, plan: { orphans: [{}] } }),
+    /引用扫描不完整/,
+  )
+  assert.match(
+    gcSafetyBlockReason({ scan: { files: 3, failed: 0, lossy: 0, ids: new Set() }, plan: { orphans: [{}] } }),
+    /0 命中/,
+  )
+  assert.equal(
+    gcSafetyBlockReason({ scan: { files: 3, failed: 1, lossy: 0, ids: new Set() }, plan: { orphans: [{}] }, force: true }),
+    null,
+  )
+  // 没有真实孤儿时不该因为 0 命中就拦
+  assert.equal(
+    gcSafetyBlockReason({ scan: { files: 3, failed: 0, lossy: 0, ids: new Set() }, plan: { orphans: [] } }),
+    null,
+  )
 })

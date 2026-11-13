@@ -33,6 +33,18 @@
 
 `gc` 只处理图片对象库；`file-objects/`（上传的文件）不动。
 
+### 多帧日志：必须用 zstd CLI 解
+
+DSH 的会话日志是**追加写入的多帧 zstd**。Node 自带的 `zlib.zstdDecompress` 只解第一帧——用它扫引用会得到「0 引用」的假象，进而把仍在用的附件整批当孤儿删掉（历史上真的发生过）。
+
+所以 `scanSessionReferences()` 的顺序是：
+
+1. 优先 `zstd -dc <file>` 流式解压（能覆盖全部帧，493 个会话约 8 秒）；
+2. CLI 不可用时回退 Node zstd，但会数帧魔数，多帧就标 `lossy`；
+3. `gc --yes` 前过 `gcSafetyBlockReason()`：`failed > 0` / `lossy > 0` / 「扫到日志却 0 命中」一律拒绝删除，只有显式 `--force` 才放行。
+
+本地改完源码同步进 profile：`pnpm sync:profile`（默认 `~/.dsh/profiles/web`，可用 `DSH_PROFILE_DIR` 覆盖），重启 DSH 生效。
+
 ## 配置
 
 在 profile 的 patch 层覆盖这一行的 `config` 即可（缺省值如下）：

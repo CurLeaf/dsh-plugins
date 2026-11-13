@@ -12,6 +12,7 @@
  * @module dsh-artifact-index/gc
  */
 
+import { spawn } from 'node:child_process'
 import { readdir, readFile, stat, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
@@ -20,6 +21,9 @@ import { promisify } from 'node:util'
 
 /** `sha256:<64 hex>` 出现的每一处都算一次引用。 */
 const ATTACHMENT_ID = /sha256:([0-9a-f]{64})/gu
+
+/** zstd 帧魔数（小端 0xFD2FB528），用于判断日志是不是多帧拼接。 */
+const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 
 /** 会话日志文件名（v4 格式）。 */
 const SESSION_LOG = 'session.v4.jsonl.zstd'
@@ -71,36 +75,112 @@ export async function findSessionLogs(root) {
 }
 
 /**
+ * 用 `zstd -dc` 流式解压并扫 id。
+ *
+ * DSH 的会话日志是**按追加写多帧**的 zstd；Node 自带的 `zstdDecompress` 只解第一帧，
+ * 用它扫引用会得到「全部未被引用」，进而把仍在用的附件当孤儿删掉。CLI 能解多帧，
+ * 且流式读取不会把整份日志堆进内存。
+ *
+ * @param {string} file
+ * @param {Set<string>} ids
+ * @returns {Promise<boolean>} CLI 是否可用且解压成功
+ */
+async function scanWithZstdCli(file, ids) {
+  return await new Promise((resolve) => {
+    let child
+    try {
+      child = spawn('zstd', ['-d', '-c', '-q', file], { stdio: ['ignore', 'pipe', 'ignore'] })
+    } catch {
+      resolve(false)
+      return
+    }
+    let carry = ''
+    let failed = false
+    child.on('error', () => {
+      failed = true
+    })
+    child.stdout.setEncoding('utf8')
+    child.stdout.on('data', (chunk) => {
+      // 跨 chunk 的 id 不能漏：保留尾巴再拼下一次
+      const text = carry + chunk
+      for (const match of text.matchAll(ATTACHMENT_ID)) ids.add(match[1])
+      carry = text.slice(-80)
+    })
+    child.on('close', (code) => resolve(!failed && code === 0))
+  })
+}
+
+/**
+ * 回退路径：Node 自带 zstd（只解首帧）。
+ *
+ * 解之前先数帧魔数：不止一帧说明这次解压是残缺的，必须把 `lossy` 报上去，
+ * 让上层拒绝 `gc --yes`，而不是悄悄按「无引用」做删除。
+ *
+ * @param {string} file
+ * @param {Set<string>} ids
+ * @returns {Promise<{ ok: boolean, lossy: boolean }>}
+ */
+async function scanWithNodeZstd(file, ids) {
+  if (zstdDecompress === null) return { ok: false, lossy: false }
+  const raw = await readFile(file)
+  let frames = 0
+  for (let at = raw.indexOf(ZSTD_MAGIC); at !== -1; at = raw.indexOf(ZSTD_MAGIC, at + ZSTD_MAGIC.length)) {
+    frames += 1
+  }
+  let text
+  try {
+    text = (await zstdDecompress(raw)).toString('utf8')
+  } catch {
+    return { ok: false, lossy: false }
+  }
+  for (const match of text.matchAll(ATTACHMENT_ID)) ids.add(match[1])
+  return { ok: true, lossy: frames > 1 }
+}
+
+/**
+ * 扫描全部会话日志，收集被引用过的附件 id，并带上「这次扫描可不可信」的统计。
+ *
+ * @param {{ root?: string, signal?: AbortSignal, onProgress?: (done: number, total: number) => void }} [options]
+ * @returns {Promise<{ ids: Set<string>, files: number, decoded: number, failed: number, lossy: number, viaCli: number }>}
+ */
+export async function scanSessionReferences(options = {}) {
+  const root = options.root ?? sessionsRootPath()
+  const files = await findSessionLogs(root)
+  const ids = new Set()
+  let done = 0
+  let decoded = 0
+  let failed = 0
+  let lossy = 0
+  let viaCli = 0
+  // 顺序解压：单个日志可能有几十 MB，并发几份就够把 CPU 打满
+  for (const file of files) {
+    if (options.signal?.aborted === true) throw new Error('已取消')
+    if (await scanWithZstdCli(file, ids)) {
+      decoded += 1
+      viaCli += 1
+    } else {
+      const fallback = await scanWithNodeZstd(file, ids)
+      if (!fallback.ok) failed += 1
+      else {
+        decoded += 1
+        if (fallback.lossy) lossy += 1
+      }
+    }
+    done += 1
+    options.onProgress?.(done, files.length)
+  }
+  return { ids, files: files.length, decoded, failed, lossy, viaCli }
+}
+
+/**
  * 扫描全部会话日志，收集被引用过的附件 id。
  *
  * @param {{ root?: string, signal?: AbortSignal, onProgress?: (done: number, total: number) => void }} [options]
  * @returns {Promise<Set<string>>} 64 位十六进制 sha256 集合（不含 `sha256:` 前缀）
  */
 export async function collectReferencedIds(options = {}) {
-  if (zstdDecompress === null) {
-    throw new Error('当前 Node 没有 zstd 解压能力（需要 22.15 / 23.8 以上），无法扫描会话日志')
-  }
-  const root = options.root ?? sessionsRootPath()
-  const files = await findSessionLogs(root)
-  const referenced = new Set()
-  let done = 0
-  // 顺序解压：单个日志可能有几十 MB，并发 4 个就够把 CPU 打满、内存翻四倍
-  for (const file of files) {
-    if (options.signal?.aborted === true) throw new Error('已取消')
-    let text
-    try {
-      text = (await zstdDecompress(await readFile(file))).toString('utf8')
-    } catch {
-      // 单个损坏的日志不该让整次扫描失败：跳过它，孤儿判据只会更保守
-      done += 1
-      options.onProgress?.(done, files.length)
-      continue
-    }
-    for (const match of text.matchAll(ATTACHMENT_ID)) referenced.add(match[1])
-    done += 1
-    options.onProgress?.(done, files.length)
-  }
-  return referenced
+  const scan = await scanSessionReferences(options)
+  return scan.ids
 }
 
 /**
@@ -129,6 +209,27 @@ export async function scanObjects(options = {}) {
     }
   }
   return objects
+}
+
+/**
+ * `gc --yes` 前的安全闸：引用扫描不可信时给出拒绝理由。
+ *
+ * 历史上这里踩过坑：Node 的 zstd 只解首帧，多帧日志被读成「0 引用」，
+ * 于是超保护期的对象被当成孤儿整批删掉。现在只要有失败/残缺就拒绝，
+ * 只有显式 `--force` 才放行。
+ *
+ * @param {{ scan: { files: number, failed: number, lossy: number, ids: Set<string> }, plan: { orphans: unknown[] }, force?: boolean }} input
+ * @returns {string | null} 拒绝理由；null 表示可以删
+ */
+export function gcSafetyBlockReason({ scan, plan, force = false }) {
+  if (force) return null
+  if (scan.failed > 0 || scan.lossy > 0) {
+    return `引用扫描不完整（失败 ${scan.failed} 个、只读到首帧 ${scan.lossy} 个）`
+  }
+  if (scan.files > 0 && scan.ids.size === 0 && plan.orphans.length > 0) {
+    return `扫了 ${scan.files} 个会话日志却 0 命中引用，疑似扫描异常`
+  }
+  return null
 }
 
 /**
