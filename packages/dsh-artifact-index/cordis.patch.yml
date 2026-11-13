@@ -1,0 +1,7 @@
+# Bundle layer of `@qzsy/dsh-artifact-index`.
+#
+# 一条 Host 行：装成 bundle 后自动挂载，不需要手改 profile 的 patch。
+# 想让视图落到别的目录，就在 profile 的 patch 层里覆盖这一行的 config。
+- insert:
+    - id: artifact-index
+      name: '@qzsy/dsh-artifact-index'

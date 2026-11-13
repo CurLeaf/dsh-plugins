@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "中间产物视图",
+    "description": "把会话里的图片以硬链接投影到 <项目>/.dsh/artifacts 并维护 index.json，同时提供 /artifacts list|backfill|clear|gc 与回合结束的清退提醒。图片本身仍留在 DSH 的共享内容寻址对象库；gc 只删「任何会话都不再引用、且超过保护期」的对象。"
+  }
+}

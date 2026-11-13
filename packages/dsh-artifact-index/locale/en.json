@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Artifact index",
+    "description": "Links a session's images into <project>/.dsh/artifacts as hardlinks and keeps an index.json, then adds /artifacts list|backfill|clear|gc plus an end-of-turn nudge to clean up. Images stay in DSH's shared content-addressed store; gc removes only objects no session references and older than the guard period."
+  }
+}

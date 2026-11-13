@@ -1,0 +1,57 @@
+{
+  "name": "@qzsy/dsh-artifact-index",
+  "version": "0.1.0",
+  "description": "Index a session's image artifacts into <project>/.dsh/artifacts as zero-cost hardlinks, with /artifacts list|backfill|clear|gc and an end-of-turn cleanup reminder.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./store": "./lib/store.js",
+    "./gc": "./lib/gc.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "artifacts",
+    "attachments",
+    "screenshots",
+    "disk-usage"
+  ],
+  "license": "MIT",
+  "author": "curleaf",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CurLeaf/dsh-plugins.git",
+    "directory": "packages/dsh-artifact-index"
+  },
+  "homepage": "https://github.com/CurLeaf/dsh-plugins/tree/main/packages/dsh-artifact-index#readme",
+  "bugs": {
+    "url": "https://github.com/CurLeaf/dsh-plugins/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
