@@ -8,6 +8,8 @@ importers:
 
   .: {}
 
+  packages/dsh-artifact-index: {}
+
   packages/dsh-command-rea: {}
 
   packages/dsh-cursor-bridge: {}
@@ -26,17 +28,17 @@ importers:
 
   packages/dsh-git-panel: {}
 
+  packages/dsh-lazy-mcp: {}
+
+  packages/dsh-mobile-touch: {}
+
   packages/dsh-restart-button:
     devDependencies:
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
 
-  packages/dsh-shell-ui:
-    devDependencies:
-      jsdom:
-        specifier: ^26.1.0
-        version: 26.1.0
+  packages/dsh-rewind: {}
 
 packages:
 
