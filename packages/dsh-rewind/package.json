@@ -1,6 +1,6 @@
 {
   "name": "@qzsy/dsh-rewind",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cursor-style checkpoints for DeepSeek Harness: revert the files a turn changed, without touching the conversation, the session title or the queue.",
   "type": "module",
   "main": "./lib/index.js",
@@ -52,5 +52,10 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   }
 }

@@ -4,8 +4,14 @@
  * Rewind keeps a *file* history, not a conversation history. Every file the
  * agent is about to write is copied first (`fs/*-intent` is awaited before the
  * write, so the copy is always the pre-image), grouped by turn and tool call.
- * Reverting writes those pre-images back; **the session log is never touched**,
- * so the session keeps its id, title, queue, drafts and model selection.
+ * Reverting writes those pre-images back and appends nothing to the session
+ * log, so the session keeps its id, title, queue, drafts and model selection.
+ *
+ * An optional context rollback, chosen per rewind, is the one exception: it
+ * rewrites the model-visible surface through a compaction checkpoint, because
+ * that is the only replacement the Host admits outside an open turn. See
+ * `forgetIn` for the event sequence and for why `developer/message` cannot be
+ * used there.
  *
  * Three seams are enough:
  *
@@ -64,6 +70,162 @@ function idOf(session) {
 /** Whether the session is a subagent run. */
 function isSubagent(session) {
 	return session.header?.origin === 'subagent'
+}
+
+/** Surface event types: only these carry a model-visible message. */
+const SURFACE = new Set(['system/message', 'developer/message', 'user/message', 'assistant/message', 'tool/result'])
+
+/**
+ * Fold one session log into its current surface: the model-visible event seqs
+ * in conversation order.
+ *
+ * A `replace` operation puts its own seq where the shadowed span used to be,
+ * exactly like the Host's surface fold. Filtering by `seq >= turnStart` is not
+ * equivalent: a log that already carries replacements keeps earlier nodes at
+ * their position, and a raw seq filter would name a span the Host rejects.
+ *
+ * @param {Array<{type: string, seq: number, surfaceOp?: unknown}>} events - log events.
+ * @returns {number[]} surface seqs in model-visible order.
+ */
+export function surfaceSeqs(events) {
+	const nodes = []
+	for (const event of events) {
+		if (!SURFACE.has(event.type)) continue
+		const op = event.surfaceOp
+		if (op === undefined || op === 'append') {
+			nodes.push(event.seq)
+			continue
+		}
+		const first = nodes.indexOf(op.startSeq)
+		const last = nodes.indexOf(op.endSeq)
+		if (first < 0 || last < first) continue
+		nodes.splice(first, last - first + 1, event.seq)
+	}
+	return nodes
+}
+
+/** Rough token estimate for one shadowed span: the Host's meter only needs a magnitude. */
+function estimateTokens(bySeq, seqs) {
+	let chars = 0
+	for (const seq of seqs) {
+		const event = bySeq.get(seq)
+		if (event === undefined) continue
+		try {
+			chars += JSON.stringify(event.data ?? null).length
+		} catch {
+			continue
+		}
+	}
+	return Math.ceil(chars / 4)
+}
+
+/**
+ * Plan the replacement of every model-visible node from `turn` onward.
+ *
+ * Pure: it reads a log and never writes. `forgetIn` turns the plan into the
+ * compaction transaction the Host admits outside an open turn.
+ *
+ * @param {Array<{type: string, seq: number, data?: object}>} events - session log.
+ * @param {number} turn - first turn to forget.
+ * @returns {{reason: string} | {startSeq: number, endSeq: number, shadowedSeqs: number[], shadowedTokenCount: number, note: string}} plan or refusal.
+ */
+export function planForget(events, turn) {
+	const last = events[events.length - 1]
+	if (last !== undefined && last.type !== 'turn/end') return { reason: 'turn-open' }
+	const start = events.find((event) => event.type === 'turn/start' && event.data?.turn === turn)
+	if (start === undefined) return { reason: 'turn-not-found' }
+	const nodes = surfaceSeqs(events)
+	const firstIndex = nodes.findIndex((seq) => seq >= start.seq)
+	if (firstIndex < 0) return { reason: 'nothing-to-forget' }
+	const shadowedSeqs = nodes.slice(firstIndex)
+	const bySeq = new Map(events.map((event) => [event.seq, event]))
+	return {
+		startSeq: shadowedSeqs[0],
+		endSeq: shadowedSeqs[shadowedSeqs.length - 1],
+		shadowedSeqs,
+		shadowedTokenCount: estimateTokens(bySeq, shadowedSeqs),
+		note: `The user reverted turn ${turn}: the file edits from that turn and everything after it were undone, and those messages were removed from this conversation. Do not rely on them; re-read any file before changing it again.`,
+	}
+}
+
+/**
+ * Replace the model-visible context from `turn` onward with one short note.
+ *
+ * The log stays append-only: the forgotten entries are shadowed by a
+ * `replace` surface operation, so every later request rebuilds history
+ * without them while the transcript on disk stays complete. Session id,
+ * title, queue and model selection are untouched.
+ *
+ * The replacement is a **compaction transaction**, because that is the only
+ * surface rewrite the Host admits outside an open turn:
+ *
+ *   compaction/start   turn: null — the value the gate admits outside a turn
+ *   compaction/summary names the shadowed span and carries the note
+ *   user/message       checkpoint source, replaces the span in place
+ *   compaction/end     turn: null
+ *
+ * A `developer/message` cannot be used here even though it is also a surface
+ * node: it is step-scoped, and the v4 admission contract requires its
+ * `turn`/`step` to match an open step. Appending one between turns is
+ * accepted by the in-memory `append` but then rejected by persistence
+ * (`developer/message turn must be a non-negative safe integer`), which
+ * breaks the session tail instead of the append.
+ *
+ * @param {{ append: Function, snapshotEvents?: Function }} session - live session to edit.
+ * @param {number} turn - first turn to forget.
+ * @returns {{forgotten: boolean, removed?: number, compactionId?: string, reason?: string}} outcome.
+ */
+export function forgetIn(session, turn) {
+	let events
+	try {
+		events = session.snapshotEvents?.() ?? []
+	} catch {
+		return { forgotten: false, reason: 'log-unavailable' }
+	}
+	const plan = planForget(events, turn)
+	if (plan.reason !== undefined) return { forgotten: false, reason: plan.reason }
+	const { startSeq, endSeq, shadowedSeqs, note } = plan
+	const compactionId = `rewind-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+	let opened = false
+	try {
+		const opening = session.append('compaction/start', { compactionId, turn: null })
+		opened = true
+		const summary = session.append('compaction/summary', {
+			compactionId,
+			summary: [{ type: 'text', text: note }],
+			shadowedRange: { start: startSeq, end: endSeq },
+			shadowedSeqs,
+			shadowedTokenCount: plan.shadowedTokenCount,
+			provider: 'dsh-rewind',
+			model: 'dsh-rewind',
+		})
+		session.append(
+			'user/message',
+			{
+				id: `rewind-${compactionId}`,
+				role: 'user',
+				source: { kind: 'compact-checkpoint', compactionId },
+				content: [{ type: 'text', text: note }],
+			},
+			{
+				surfaceOp: { op: 'replace', startSeq, endSeq },
+				sourceEventSeqs: [opening.seq, summary.seq, ...shadowedSeqs],
+			},
+		)
+		session.append('compaction/end', { compactionId, turn: null })
+		return { forgotten: true, removed: shadowedSeqs.length, compactionId }
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		/* An open compaction would gate every later turn, so close it as failed. */
+		if (opened) {
+			try {
+				session.append('compaction/end', { compactionId, turn: null, error: message })
+			} catch {
+				/* the Host refuses to close it; report the original failure */
+			}
+		}
+		return { forgotten: false, reason: message }
+	}
 }
 
 /**
@@ -213,59 +375,17 @@ export function apply(ctx) {
 		)
 	}
 
-	/** Surface event types: only these carry a model-visible message. */
-	const SURFACE = new Set(['system/message', 'developer/message', 'user/message', 'assistant/message', 'tool/result'])
-
 	/**
-	 * Replace the model-visible context from `turn` onward with one short note.
-	 *
-	 * The session log stays append-only: the discarded entries are shadowed by a
-	 * `replace` surface operation, so every future request rebuilds history
-	 * without them while the transcript on disk remains complete. This is the
-	 * same surface mechanism compaction uses, and it keeps the session id, title,
-	 * queue and model selection untouched.
+	 * Resolve the live session and forget from one turn onward.
 	 *
 	 * @param {string} sessionId - live session to edit.
 	 * @param {number} turn - first turn to forget.
-	 * @returns {{forgotten: boolean, removed?: number, reason?: string}} outcome.
+	 * @returns {{forgotten: boolean, removed?: number, compactionId?: string, reason?: string}} outcome.
 	 */
 	const forgetFromTurn = (sessionId, turn) => {
 		const session = live.get(sessionId)
 		if (session === undefined) return { forgotten: false, reason: 'session-not-live' }
-		let events
-		try {
-			events = session.snapshotEvents?.() ?? []
-		} catch {
-			return { forgotten: false, reason: 'log-unavailable' }
-		}
-		const last = events[events.length - 1]
-		if (last !== undefined && last.type !== 'turn/end') return { forgotten: false, reason: 'turn-open' }
-		const start = events.find((event) => event.type === 'turn/start' && event.data?.turn === turn)
-		if (start === undefined) return { forgotten: false, reason: 'turn-not-found' }
-		const shadowed = events.filter((event) => event.seq >= start.seq && SURFACE.has(event.type))
-		if (shadowed.length === 0) return { forgotten: false, reason: 'nothing-to-forget' }
-		const startSeq = shadowed[0].seq
-		const endSeq = shadowed[shadowed.length - 1].seq
-		try {
-			session.append(
-				'developer/message',
-				{
-					message: {
-						role: 'developer',
-						content: [
-							{
-								type: 'text',
-								text: `The user reverted turn ${turn}: the file edits from that turn and everything after it were undone, and those messages were removed from this conversation. Do not rely on them; re-read any file before changing it again.`,
-							},
-						],
-					},
-				},
-				{ surfaceOp: { op: 'replace', startSeq, endSeq }, sourceEventSeqs: shadowed.map((event) => event.seq) },
-			)
-			return { forgotten: true, removed: shadowed.length }
-		} catch (error) {
-			return { forgotten: false, reason: error instanceof Error ? error.message : String(error) }
-		}
+		return forgetIn(session, turn)
 	}
 
 	/** Resolve a session from an event seq, for slots without session context. */
@@ -344,8 +464,10 @@ export function apply(ctx) {
 		if (action === 'apply') {
 			const turn = Number(payload.turn)
 			if (!Number.isInteger(turn) || turn < 1) throw new RouteError('bad-request', 'turn must be a positive integer')
-			const paths = Array.isArray(payload.paths) ? payload.paths.filter((path) => typeof path === 'string') : undefined
-			return await store.apply({ sessionId, targetTurn: turn, paths, force: payload.force === true })
+			/* A rewind is all-or-nothing by design: every file this turn and every
+			 * later turn changed. `paths` is deliberately ignored, so an older
+			 * cached browser bundle cannot reintroduce partial reverts. */
+			return await store.apply({ sessionId, targetTurn: turn, force: payload.force === true })
 		}
 		if (action === 'forget') {
 			const turn = Number(payload.turn)

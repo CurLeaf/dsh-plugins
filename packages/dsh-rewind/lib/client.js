@@ -3,8 +3,9 @@
  *
  * One affordance: a footer button at the end of every completed turn —
  * `↩ 回退本轮`. Clicking it asks the Host for a plan (which files that turn
- * changed, which of them were touched by the user since), shows the list with
- * checkboxes, and applies the ones you keep.
+ * changed, which of them were touched by the user since), shows the list, and
+ * writes them all back. A rewind is all-or-nothing: the Host reverts every
+ * file that turn and every later turn changed.
  *
  * Nothing here touches the conversation. The session id, its title, the input
  * queue and the model selection are all left exactly as they were.
@@ -29,23 +30,26 @@ window.__ModuleLoader__.load({
 
 		const zh = {
 			'action.label': '回退本轮',
-			'action.inline': '回退第 {turn} 轮的文件改动',
-			'title.turn': '回退第 {turn} 轮',
+			'action.inline': '回退第 {turn} 轮及之后的文件改动',
+			'title.turn': '回退第 {turn} 轮及之后',
+			'scope': '共 {files} 个文件：写回 {restore} 个，删除 {remove} 个',
+			'scope.none': '没有可写回的文件',
 			'forget': '同时回滚上下文：模型不再记得这一轮（会话名、队列不变）',
 			'forgot': '上下文已回滚（{count} 条从后续请求中移除）',
 			'forgetFailed': '文件已回退，但上下文回滚失败：{reason}',
 			'action.count': '回退本轮 · {count} 个文件',
+			'action.count.all': '回退本轮及之后 · {count} 个文件',
 			'action.none': '本轮没有可回退的文件改动',
 			'title': '回退到本轮开始之前',
-			'explain': '只写回这一轮改过的文件，对话、标题和输入队列都不动。',
+			'explain': '写回这一轮及之后所有轮改过的文件，一次全量，不挑文件。对话、标题和输入队列都不动。',
 			'files': '{count} 个文件',
-			'conflicts': '{count} 个文件被你在之后改动过，默认跳过',
+			'conflicts': '{count} 个文件被你在之后改动过，这次跳过，不覆盖你的改动',
 			'restore': '恢复',
 			'delete': '删除',
 			'unrestorable': '不可还原',
 			'conflict': '你改过',
 			'cancel': '取消',
-			'apply': '确认回退',
+			'apply': '全部回退',
 			'applying': '回退中…',
 			'applied': '已恢复 {restored} · 删除 {deleted} · 跳过 {skipped}',
 			'undo': '撤销这次回退',
@@ -58,23 +62,26 @@ window.__ModuleLoader__.load({
 
 		const en = {
 			'action.label': 'Rewind turn',
-			'action.inline': 'Revert the files turn {turn} changed',
-			'title.turn': 'Revert turn {turn}',
+			'action.inline': 'Revert the files turn {turn} and every later turn changed',
+			'title.turn': 'Revert turn {turn} and everything after',
+			'scope': '{files} files: write back {restore}, delete {remove}',
+			'scope.none': 'No files to write back',
 			'forget': 'Also forget it: the model no longer sees this turn (title and queue stay)',
 			'forgot': 'Context rolled back ({count} entries removed from future requests)',
 			'forgetFailed': 'Files reverted, but the context rollback failed: {reason}',
 			'action.count': 'Rewind turn · {count} files',
+			'action.count.all': 'Rewind turn and after · {count} files',
 			'action.none': 'This turn changed no files',
 			'title': 'Revert to before this turn',
-			'explain': 'Writes back only the files this turn changed. The chat, its title and the queue stay untouched.',
+			'explain': 'Writes back every file this turn and every later turn changed — one full revert, no file picking. The chat, its title and the queue stay untouched.',
 			'files': '{count} files',
-			'conflicts': '{count} files were edited after the agent and are skipped',
+			'conflicts': '{count} files were edited after the agent; they are skipped so your edits survive',
 			'restore': 'restore',
 			'delete': 'delete',
 			'unrestorable': 'not restorable',
 			'conflict': 'edited by you',
 			'cancel': 'Cancel',
-			'apply': 'Revert',
+			'apply': 'Revert all',
 			'applying': 'Reverting…',
 			'applied': 'Restored {restored} · deleted {deleted} · skipped {skipped}',
 			'undo': 'Undo this revert',
@@ -169,7 +176,6 @@ window.__ModuleLoader__.load({
 .dsh-rewind-note { opacity: .68; line-height: 1.5; margin-bottom: 8px; }
 .dsh-rewind-list { list-style: none; margin: 0; padding: 0; }
 .dsh-rewind-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
-.dsh-rewind-row input { margin: 0; }
 .dsh-rewind-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .dsh-rewind-tag { font-size: 10px; padding: 1px 5px; border-radius: 999px; border: 1px solid rgba(127,127,127,.35); opacity: .8; }
 .dsh-rewind-tag[data-kind="conflict"] { border-color: rgba(214,120,40,.75); color: rgb(214,120,40); }
@@ -200,8 +206,8 @@ window.__ModuleLoader__.load({
 .dsh-rewind-pop-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
 .dsh-rewind-pop-note { opacity: .68; line-height: 1.5; margin-bottom: 8px; }
 .dsh-rewind-pop-list { display: flex; flex-direction: column; gap: 2px; }
-.dsh-rewind-pop-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; }
-.dsh-rewind-pop-row input { margin: 0; }
+.dsh-rewind-pop-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.dsh-rewind-pop-scope { margin-top: 6px; }
 .dsh-rewind-pop-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .dsh-rewind-pop-tag { font-size: 10px; padding: 1px 5px; border-radius: 999px; border: 1px solid rgba(127,127,127,.35); opacity: .8; }
 .dsh-rewind-pop-tag.conflict { border-color: rgba(214,120,40,.75); color: rgb(214,120,40); }
@@ -233,7 +239,6 @@ window.__ModuleLoader__.load({
 			const [summary, setSummary] = useState(undefined)
 			const [open, setOpen] = useState(false)
 			const [plan, setPlan] = useState(undefined)
-			const [selected, setSelected] = useState(undefined)
 			const [busy, setBusy] = useState(false)
 			const [error, setError] = useState(undefined)
 			const [done, setDone] = useState(undefined)
@@ -291,7 +296,6 @@ window.__ModuleLoader__.load({
 				try {
 					const value = await call({ action: 'plan', sessionId, turn: props.turn })
 					setPlan(value)
-					setSelected(new Set(value.entries.filter((entry) => entry.restorable && !entry.conflict).map((entry) => entry.path)))
 					setOpen(true)
 				} catch (problem) {
 					setError(problem instanceof Error ? problem.message : String(problem))
@@ -302,11 +306,12 @@ window.__ModuleLoader__.load({
 			}, [sessionId, props.turn])
 
 			const apply = useCallback(async () => {
-				if (sessionId === undefined || plan === undefined || selected === undefined) return
+				if (sessionId === undefined || plan === undefined) return
 				setBusy(true)
 				setError(undefined)
 				try {
-					const value = await call({ action: 'apply', sessionId, turn: props.turn, paths: [...selected] })
+					/* Full revert: every file this turn and every later turn changed. */
+					const value = await call({ action: 'apply', sessionId, turn: props.turn })
 					setDone({ ...value, at: Date.now() })
 					setOpen(false)
 					setPlan(undefined)
@@ -318,7 +323,7 @@ window.__ModuleLoader__.load({
 				} finally {
 					setBusy(false)
 				}
-			}, [sessionId, props.turn, plan, selected])
+			}, [sessionId, props.turn, plan])
 
 			const undo = useCallback(async () => {
 				if (sessionId === undefined || done === undefined) return
@@ -344,6 +349,8 @@ window.__ModuleLoader__.load({
 			}, [done])
 
 			const count = row?.files ?? 0
+			/* The Host reverts this turn and every later one, so the button counts the tail. */
+			const tailCount = (summary?.turns ?? []).filter((entry) => entry.turn >= (props.turn ?? 0)).reduce((total, entry) => total + entry.files, 0)
 			const canUndo = summary?.lastRevert !== undefined && summary.lastRevert !== null
 			/* The inline button is the primary affordance; the footer only takes
 			 * over if DOM anchoring stops working (a future Host layout change). */
@@ -364,7 +371,7 @@ window.__ModuleLoader__.load({
 								disabled: busy,
 								onClick: showPlan,
 							},
-							`↩ ${count > 0 ? fill(t('action.count'), { count }) : t('action.label')}`,
+							`↩ ${count > 0 ? fill(t(tailCount > count ? 'action.count.all' : 'action.count'), { count: tailCount }) : t('action.label')}`,
 						)
 					: h(
 							'span',
@@ -386,23 +393,23 @@ window.__ModuleLoader__.load({
 								? h('div', { className: 'dsh-rewind-note' }, fill(t('conflicts'), { count: plan.stats.conflicts }))
 								: null,
 							h(
+								'div',
+								{ className: 'dsh-rewind-note' },
+								plan.entries.filter((entry) => entry.restorable && !entry.conflict).length === 0
+									? t('scope.none')
+									: fill(t('scope'), {
+											files: plan.entries.filter((entry) => entry.restorable && !entry.conflict).length,
+											restore: plan.entries.filter((entry) => entry.restorable && !entry.conflict && entry.op !== 'delete').length,
+											remove: plan.entries.filter((entry) => entry.restorable && !entry.conflict && entry.op === 'delete').length,
+										}),
+							),
+							h(
 								'ul',
 								{ className: 'dsh-rewind-list' },
 								plan.entries.map((entry) =>
 									h(
 										'li',
 										{ className: 'dsh-rewind-row', key: entry.path },
-										h('input', {
-											type: 'checkbox',
-											checked: selected.has(entry.path),
-											disabled: !entry.restorable,
-											onChange: (event) => {
-												const next = new Set(selected)
-												if (event.target.checked) next.add(entry.path)
-												else next.delete(entry.path)
-												setSelected(next)
-											},
-										}),
 										h('span', { className: 'dsh-rewind-path', title: entry.path }, entry.display),
 										entry.op === 'delete'
 											? h('span', { className: 'dsh-rewind-tag', 'data-kind': 'delete' }, t('delete'))
@@ -430,7 +437,7 @@ window.__ModuleLoader__.load({
 								h('button', { type: 'button', className: 'dsh-rewind-ghost', onClick: () => setOpen(false) }, t('cancel')),
 								h(
 									'button',
-									{ type: 'button', className: 'dsh-rewind-primary', onClick: apply, disabled: busy || selected.size === 0 },
+									{ type: 'button', className: 'dsh-rewind-primary', onClick: apply, disabled: busy || plan.entries.every((entry) => !entry.restorable || entry.conflict) },
 									busy ? t('applying') : t('apply'),
 								),
 							),
@@ -525,7 +532,9 @@ window.__ModuleLoader__.load({
 
 			const panel = document.createElement('div')
 			panel.className = 'dsh-rewind-pop'
-			const selected = new Set(plan.entries.filter((entry) => entry.restorable && !entry.conflict).map((entry) => entry.path))
+			/* Conflicts are restorable but skipped, so they are not "will be written". */
+			const applicable = plan.entries.filter((entry) => entry.restorable && !entry.conflict)
+			const deletable = applicable.filter((entry) => entry.op === 'delete')
 
 			const title = document.createElement('div')
 			title.className = 'dsh-rewind-pop-title'
@@ -539,25 +548,27 @@ window.__ModuleLoader__.load({
 				: inline.translator('explain')
 			panel.append(note)
 
+			const scope = document.createElement('div')
+			scope.className = 'dsh-rewind-pop-note dsh-rewind-pop-scope'
+			scope.textContent = applicable.length === 0
+				? inline.translator('scope.none')
+				: fill(inline.translator('scope'), {
+						files: applicable.length,
+						restore: applicable.length - deletable.length,
+						remove: deletable.length,
+					})
+			panel.append(scope)
+
 			const list = document.createElement('div')
 			list.className = 'dsh-rewind-pop-list'
 			for (const entry of plan.entries) {
-				const row = document.createElement('label')
+				const row = document.createElement('div')
 				row.className = 'dsh-rewind-pop-row'
-				const box = document.createElement('input')
-				box.type = 'checkbox'
-				box.checked = selected.has(entry.path)
-				box.disabled = !entry.restorable
-				box.addEventListener('change', () => {
-					if (box.checked) selected.add(entry.path)
-					else selected.delete(entry.path)
-					confirm.disabled = selected.size === 0
-				})
 				const name = document.createElement('span')
 				name.className = 'dsh-rewind-pop-path'
 				name.textContent = entry.display
 				name.title = entry.path
-				row.append(box, name)
+				row.append(name)
 				if (entry.op === 'delete') {
 					const tag = document.createElement('span')
 					tag.className = 'dsh-rewind-pop-tag'
@@ -596,12 +607,14 @@ window.__ModuleLoader__.load({
 			confirm.type = 'button'
 			confirm.className = 'dsh-rewind-pop-primary'
 			confirm.textContent = inline.translator('apply')
-			confirm.disabled = selected.size === 0
+			confirm.disabled = applicable.length === 0
 			confirm.addEventListener('click', async () => {
 				confirm.disabled = true
 				confirm.textContent = inline.translator('applying')
 				try {
-					const result = await call({ action: 'apply', sessionId, turn, paths: [...selected] })
+					/* Full revert: the Host writes back every file this turn and
+					 * every later turn changed. No per-file selection. */
+					const result = await call({ action: 'apply', sessionId, turn })
 					inline.applied = { ...result, sessionId }
 					let forget
 					if (forgetBox.checked) {

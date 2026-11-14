@@ -406,22 +406,24 @@ export class RewindStore {
 	 * Apply a plan: write pre-images back (or delete created files), and keep an
 	 * undo journal so the revert itself can be reversed.
 	 *
+	 * A rewind is all-or-nothing: every file the plan names is written back, so
+	 * there is no per-path selection. Conflicted files are still skipped unless
+	 * `force` is set, because overwriting a human edit is never implied by
+	 * "revert everything".
+	 *
 	 * @param {object} input - apply request.
 	 * @param {string} input.sessionId - session identity.
 	 * @param {number} input.targetTurn - revert boundary.
-	 * @param {string[]} [input.paths] - restrict to these absolute paths.
 	 * @param {boolean} [input.force] - also overwrite conflicted paths.
 	 * @returns {Promise<object>} the applied revert, including its undo id.
 	 */
-	async apply({ sessionId, targetTurn, paths, force = false }) {
+	async apply({ sessionId, targetTurn, force = false }) {
 		const plan = await this.plan(sessionId, targetTurn)
-		const wanted = paths === undefined ? undefined : new Set(paths)
 		const journal = []
 		const skipped = []
 		let restored = 0
 		let deleted = 0
 		for (const entry of plan.entries) {
-			if (wanted !== undefined && !wanted.has(entry.path)) continue
 			if (!entry.restorable) {
 				skipped.push({ path: entry.display, reason: 'not-restorable' })
 				continue

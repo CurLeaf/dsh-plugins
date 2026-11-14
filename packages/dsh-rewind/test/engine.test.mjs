@@ -63,7 +63,7 @@ test('reverting a create deletes the file, reverting a delete restores it', asyn
 	assert.equal(await readFile(removed, 'utf8'), 'KEEP')
 })
 
-test('an earlier turn only restores paths that turn touched', async () => {
+test('an earlier turn reverts every later turn too', async () => {
 	const { base, store, sessionId } = await fixture()
 	const a = join(base, 'a.txt')
 	const b = join(base, 'b.txt')
