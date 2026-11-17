@@ -2,4 +2,4 @@
 # package as a bundle mounts it; no manual profile patch.
 - insert:
     - id: restart-button
-      name: @qzsy/dsh-restart-button
+      name: '@qzsy/dsh-restart-button'
