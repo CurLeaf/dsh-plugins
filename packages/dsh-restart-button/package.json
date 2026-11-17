@@ -1,5 +1,5 @@
 {
-  "name": "dsh-restart-button",
+  "name": "@qzsy/dsh-restart-button",
   "version": "0.1.3",
   "description": "A restart button inside the DSH account row (desktop sidebar and mobile drawer): one authenticated Host route restarts the dsh-web service, the browser half attaches a two-step confirm button to the avatar row.",
   "type": "module",
