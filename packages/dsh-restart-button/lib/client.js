@@ -18,8 +18,10 @@
  * 截住，账号菜单（个人中心）收不到这次点击；打开弹窗前还会把已经展开的账号菜单
  * 收起，避免两层浮层叠在一起抢焦点。
  */
+// 注册 id 必须等于包名（DSH 客户端模块表按包名索引；写裸名会
+// "loaded without registering" → 整个客户端半边不激活，按钮消失）。
 window.__ModuleLoader__.load({
-	id: 'dsh-restart-button',
+	id: '@qzsy/dsh-restart-button',
 	factory(require) {
 		/** 宿主路由，相对路径：转发部署（子路径）下也能落到同一处。 */
 		const STATUS_URL = 'api/restart-button/status'
