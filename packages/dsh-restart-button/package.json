@@ -1,6 +1,6 @@
 {
   "name": "@qzsy/dsh-restart-button",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A restart button inside the DSH account row (desktop sidebar and mobile drawer): one authenticated Host route restarts the dsh-web service, the browser half attaches a restart button that opens a confirmation and in-dialog progress to the avatar row.",
   "type": "module",
   "main": "./lib/index.js",
