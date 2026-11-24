@@ -14,6 +14,13 @@
  * this half only renders and calls it. Opening a file is the Sidebar's own
  * `openResource` (`dsh-resource://file/...`), so a changed file lands in the
  * same previewer any other file link uses.
+ *
+ * A change row follows Cursor's Source Control row, not a generic list row:
+ * click opens the file's changes; hover swaps the badge and counts for the
+ * three inline actions Cursor shows (open file, discard, stage — unstage for a
+ * staged row); right-click opens the shared context menu with the navigation,
+ * modification and path groups in that order. New tabs keep opening in the
+ * right Sidebar, which is this product's editor area.
  */
 window.__ModuleLoader__.load({
 	id: '@qzsy/dsh-git-panel',
@@ -35,6 +42,35 @@ window.__ModuleLoader__.load({
 		const GIT_KIND = 'git'
 		/** Page kind of the diff preview. */
 		const DIFF_KIND = 'git-diff'
+		/**
+		 * Context-menu target family of one change row.
+		 *
+		 * A family of its own, not the shared `file` family: the file family's
+		 * contributions (rename, delete, reveal) act on the work tree, and a
+		 * staged row is not that. The value stays JSON-shaped so the menu can
+		 * capture it.
+		 */
+		const CHANGE_TARGET = 'gitChange'
+		/** Keys this package publishes into the shared `contextMenu.icon` seat. */
+		const MENU_ICON_KEYS = {
+			changes: 'git-panel.changes',
+			image: 'git-panel.image',
+			file: 'git-panel.file',
+			compare: 'git-panel.compare',
+			stage: 'git-panel.stage',
+			unstage: 'git-panel.unstage',
+			discard: 'git-panel.discard',
+			copyPath: 'git-panel.copy-path',
+			quote: 'git-panel.quote',
+		}
+		/**
+		 * Menu actions that start a new group.
+		 *
+		 * Cursor's resource menu reads navigation → modification → view; the
+		 * separator above the first modification verb and above the path copy is
+		 * what makes those three groups legible.
+		 */
+		const MENU_GROUP_BREAK = new Set(['stage', 'unstage', 'copyPath'])
 		/** Host route, relative so a forwarded deployment keeps working. */
 		const ROUTE = 'api/git-panel'
 		/** One `<style>` element per page. */
@@ -50,34 +86,41 @@ window.__ModuleLoader__.load({
 			push: 'status.pushing',
 			sync: 'status.syncing',
 		}
-		/** Lane geometry of the graph, in CSS pixels. */
-		const LANE_WIDTH = 16
-		const ROW_HEIGHT = 38
-		const NODE_RADIUS = 4.8
+		/**
+		 * Lane geometry of the graph, in CSS pixels. The pitch and row height are
+		 * VS Code's Source Control Graph numbers (11px between lane centres, 22px
+		 * rows) loosened just enough that our two-line rows — subject plus
+		 * hash/author/date — still breathe.
+		 */
+		const LANE_WIDTH = 12
+		const ROW_HEIGHT = 36
+		const NODE_RADIUS = 4
 		/** Left/right breathing room inside the lane canvas. */
 		const GRAPH_PAD = 8
 		/** Curve tension as a fraction of the segment: Git Graph uses 0.8 for its rounded style. */
 		const CURVE_TENSION = 0.8
 		/**
 		 * Horizontal budget of one lane canvas, in CSS pixels. Without it the
-		 * canvas is `18px × lanes` wide, which overflows a sidebar long before the
-		 * 400-commit ceiling is reached (59 lanes = 1060px).
+		 * canvas is `16px + 12px × lanes` wide, which overflows a sidebar long
+		 * before the 400-commit ceiling is reached (59 lanes = 568px).
 		 */
 		const GRAPH_MAX_WIDTH = 260
 		/**
 		 * Lanes never get thinner than this. Squeezing 59 lanes into the 260px budget
-		 * put the pitch at 4.2px, and a 0.2px pitch on a 1161-lane history is not a
+		 * put the pitch at 4.1px, and a 0.2px pitch on a 1161-lane history is not a
 		 * readable graph — below this floor the canvas grows and the pane scrolls.
 		 */
-		const LANE_MIN_WIDTH = 6
+		const LANE_MIN_WIDTH = 5
 		/**
-		 * Branch-line palette, taken from VS Code Git Graph's default
-		 * `git-graph.graph.colours` (12 entries) so the graph reads the same way.
+		 * Branch-line palette: the Okabe-Ito colours VS Code draws its Source
+		 * Control Graph with, so lanes read the same way as the local Cursor. The
+		 * values live in CSS variables because the light theme needs darker
+		 * strokes; `var()` works in SVG presentation attributes.
 		 * Order matters: adjacent lanes differ most at the front of the list.
 		 */
 		const LANE_COLORS = [
-			'#0085d9', '#d9008f', '#00d90a', '#d98500', '#a300d9', '#ff0000',
-			'#00d9cc', '#e138e8', '#85d900', '#dc5b23', '#6f24d6', '#ffcc00',
+			'var(--gp-lane-1)', 'var(--gp-lane-2)', 'var(--gp-lane-3)', 'var(--gp-lane-4)',
+			'var(--gp-lane-5)', 'var(--gp-lane-6)', 'var(--gp-lane-7)', 'var(--gp-lane-8)',
 		]
 
 		/** True on a Mac, where the commit chord is ⌘ instead of Ctrl. */
@@ -121,7 +164,8 @@ window.__ModuleLoader__.load({
 			'error.dismiss': '知道了',
 			'empty.noSession': '这个面板需要一个打开的会话',
 			'empty.noRepo': '当前会话的工作目录不在 Git 仓库里',
-			'empty.clean': '工作区干净，没有待提交的改动',
+			'empty.cleanTitle': '工作区干净',
+			'empty.cleanHint': '没有待提交的改动',
 			'empty.loading': '正在读取仓库…',
 			'branch.detached': '游离 HEAD',
 			'branch.ahead': '领先 {count}',
@@ -146,6 +190,7 @@ window.__ModuleLoader__.load({
 			'changes.untracked': '未跟踪',
 			'changes.conflicts': '合并改动',
 			'changes.stageAll': '全部暂存',
+			'changes.stageAllMerge': '全部暂存（标记已解决）',
 			'changes.unstageAll': '全部取消暂存',
 			'changes.discardAll': '全部丢弃',
 			'changes.previewAll': '预览全部改动',
@@ -158,6 +203,20 @@ window.__ModuleLoader__.load({
 			'row.openImage': '在侧边栏预览图片',
 			'row.openFile': '在新标签里打开文件',
 			'row.delete': '删除这个未跟踪文件',
+			'menu.changes': '查看改动',
+			'menu.image': '预览图片',
+			'menu.file': '打开文件',
+			'menu.compare': '与工作区比较',
+			'menu.stage': '暂存改动',
+			'menu.unstage': '取消暂存',
+			'menu.discard': '丢弃改动…',
+			'menu.copyPath': '复制路径',
+			'menu.quote': '引用到对话',
+			'menu.copiedPath': '已复制路径',
+			'menu.failed.stage': '暂存这个文件没有成功',
+			'menu.failed.unstage': '取消暂存没有成功',
+			'menu.failed.discard': '丢弃改动没有成功',
+			'menu.failed.copy': '复制路径没有成功',
 			'change.M': '已修改',
 			'change.A': '新增文件（已暂存）',
 			'change.U': '新增文件（未跟踪）',
@@ -246,7 +305,8 @@ window.__ModuleLoader__.load({
 			'error.dismiss': 'Dismiss',
 			'empty.noSession': 'This panel needs an open session',
 			'empty.noRepo': 'The session working directory is not a Git work tree',
-			'empty.clean': 'The work tree is clean',
+			'empty.cleanTitle': 'The work tree is clean',
+			'empty.cleanHint': 'Nothing to commit',
 			'empty.loading': 'Reading the repository…',
 			'branch.detached': 'detached HEAD',
 			'branch.ahead': '{count} ahead',
@@ -271,6 +331,7 @@ window.__ModuleLoader__.load({
 			'changes.untracked': 'Untracked',
 			'changes.conflicts': 'Merge changes',
 			'changes.stageAll': 'Stage all',
+			'changes.stageAllMerge': 'Stage all (mark resolved)',
 			'changes.unstageAll': 'Unstage all',
 			'changes.discardAll': 'Discard all',
 			'changes.previewAll': 'Preview all changes',
@@ -283,6 +344,20 @@ window.__ModuleLoader__.load({
 			'row.openImage': 'Preview the image in the sidebar',
 			'row.openFile': 'Open the file in a new tab',
 			'row.delete': 'Delete this untracked file',
+			'menu.changes': 'Open Changes',
+			'menu.image': 'Preview Image',
+			'menu.file': 'Open File',
+			'menu.compare': 'Open Changes with Working File',
+			'menu.stage': 'Stage Changes',
+			'menu.unstage': 'Unstage Changes',
+			'menu.discard': 'Discard Changes…',
+			'menu.copyPath': 'Copy Path',
+			'menu.quote': 'Quote in Chat',
+			'menu.copiedPath': 'Path copied',
+			'menu.failed.stage': 'Could not stage the file',
+			'menu.failed.unstage': 'Could not unstage the file',
+			'menu.failed.discard': 'Could not discard the changes',
+			'menu.failed.copy': 'Could not copy the path',
 			'change.M': 'Modified',
 			'change.A': 'Added file (staged)',
 			'change.U': 'New file (untracked)',
@@ -423,11 +498,29 @@ window.__ModuleLoader__.load({
   --gp-file-lock:#6b6c73;
   --gp-file-shell:#2f7d4a;
 
-  --gp-accent:#2f6fb3;
-  --gp-accent-hover:#255d97;
+  --gp-accent:#007acc;
+  --gp-accent-hover:#0062a3;
   --gp-accent-ink:#ffffff;
-  --gp-accent-soft:rgba(47,111,179,.12);
-  --gp-ring:0 0 0 3px rgba(47,111,179,.3);
+  --gp-accent-soft:rgba(0,122,204,.12);
+  --gp-ring:0 0 0 3px rgba(0,122,204,.3);
+  /* Graph lane colours and ref badges: VS Code's Source Control Graph palette.
+     Light-theme strokes are the darker Okabe-Ito variants; ref badges are solid
+     pastel chips with ink, the way Cursor paints branch labels. */
+  --gp-lane-1:#b26a00;
+  --gp-lane-2:#b10c63;
+  --gp-lane-3:#00827a;
+  --gp-lane-4:#7a3e00;
+  --gp-lane-5:#7a3fd1;
+  --gp-lane-6:#2d6fd6;
+  --gp-lane-7:#00734f;
+  --gp-lane-8:#b34400;
+  --gp-ref-branch:#007acc;
+  --gp-ref-remote:#652d90;
+  --gp-ref-tag:#b26a00;
+  --gp-ref-head:#007acc;
+  --gp-ref-default:#c4c4c4;
+  --gp-ref-ink:#ffffff;
+  --gp-ref-default-ink:#333333;
 
   --gp-radius-s:6px;
   --gp-radius-m:9px;
@@ -454,11 +547,27 @@ body[data-ds-dark-theme] .gp-root{
   --gp-file-archive:#9aa3ad;
   --gp-file-lock:#a9a9b3;
   --gp-file-shell:#8fd39a;
-  --gp-accent:#9dbcd8;
-  --gp-accent-hover:#b2cbe2;
-  --gp-accent-ink:#0d1319;
-  --gp-accent-soft:rgba(157,188,216,.16);
-  --gp-ring:0 0 0 3px rgba(157,188,216,.3);
+  --gp-accent:#0e639c;
+  --gp-accent-hover:#1177bb;
+  --gp-accent-ink:#ffffff;
+  --gp-accent-soft:rgba(14,99,156,.22);
+  --gp-ring:0 0 0 3px rgba(14,99,156,.38);
+
+  --gp-lane-1:#ffb000;
+  --gp-lane-2:#dc267f;
+  --gp-lane-3:#40b0a6;
+  --gp-lane-4:#994f00;
+  --gp-lane-5:#b66dff;
+  --gp-lane-6:#648fff;
+  --gp-lane-7:#009e73;
+  --gp-lane-8:#d55e00;
+  --gp-ref-branch:#75beff;
+  --gp-ref-remote:#b180d7;
+  --gp-ref-tag:#ffb000;
+  --gp-ref-head:#75beff;
+  --gp-ref-default:#4d4d4d;
+  --gp-ref-ink:#0d1319;
+  --gp-ref-default-ink:#f5f5f7;
 
   --gp-diff-add-line:color-mix(in srgb,var(--gp-green) 10%,transparent);
   --gp-diff-add-text:color-mix(in srgb,var(--gp-green) 12%,transparent);
@@ -495,28 +604,36 @@ body:not([data-ds-dark-theme]) .gp-root{
 
 /* --- review --------------------------------------------------------------- */
 .gp-review{flex:none;display:flex;flex-direction:column;gap:6px;padding:8px 12px 6px}
-.gp-review-head{display:flex;align-items:center;gap:6px;align-self:flex-start;font-size:10.5px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--gp-label-3);cursor:pointer;user-select:none;padding:2px 6px;margin-left:-6px;border-radius:var(--gp-radius-s);transition:background .12s var(--gp-ease),color .12s var(--gp-ease)}
+.gp-review-head{display:flex;align-items:center;gap:6px;align-self:flex-start;height:24px;font-size:11px;font-weight:600;letter-spacing:.045em;text-transform:uppercase;color:var(--gp-label-3);cursor:pointer;user-select:none;padding:0 6px;margin-left:-6px;border-radius:var(--gp-radius-s);transition:background .12s var(--gp-ease),color .12s var(--gp-ease)}
 .gp-review-head:hover{background:var(--gp-hover);color:var(--gp-label-2)}
 .gp-review-head:focus-visible{outline:none;box-shadow:var(--gp-ring)}
 .gp-review-btn{width:100%;height:28px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:.5px solid var(--gp-separator);border-radius:var(--gp-radius-s);background:transparent;color:var(--gp-label-2);font:inherit;font-size:12px;font-weight:560;cursor:pointer;transition:background .12s var(--gp-ease),color .12s var(--gp-ease),border-color .12s var(--gp-ease)}
 .gp-review-btn:hover:not(:disabled){background:var(--gp-hover);border-color:var(--gp-label-4);color:var(--gp-label)}
 .gp-review-btn:active:not(:disabled){transform:scale(.995)}
-.gp-review-btn:disabled{opacity:.42;cursor:default}
-.gp-review-btn svg{width:13px;height:13px;flex:none}
+.gp-review-btn:disabled{opacity:1;border-color:var(--gp-hairline);color:var(--gp-label-4);background:transparent;cursor:default}
+.gp-review-btn svg{width:14px;height:14px;flex:none}
 
 /* --- changes -------------------------------------------------------------- */
-.gp-changes{flex:1;min-height:90px;padding:2px 0 6px}
+.gp-changes{flex:1;min-height:90px;padding:2px 0 6px;display:flex;flex-direction:column}
 .gp-section{flex:none}
+.gp-section-empty{flex:1;display:flex;flex-direction:column;min-height:0}
+/* Clean work tree: a centred, quiet state instead of a lonely line of text
+   floating at the top of a tall empty pane. */
+.gp-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:28px 16px;text-align:center;animation:gp-fade .16s var(--gp-ease)}
+.gp-empty-icon{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;color:var(--gp-label-3)}
+.gp-empty-icon svg{width:28px;height:28px;stroke-width:1.5}
+.gp-empty-title{font-size:12.5px;font-weight:560;letter-spacing:-.006em;color:var(--gp-label-2)}
+.gp-empty-hint{font-size:11px;line-height:1.5;color:var(--gp-label-4)}
 .gp-section-head{display:flex;align-items:center;gap:2px;padding:0 6px;height:30px}
-.gp-section-head-graph{height:34px;padding:0 6px 0 4px;border-top:.5px solid var(--gp-hairline);border-bottom:.5px solid var(--gp-hairline);gap:2px}
-.gp-section-toggle{display:flex;align-items:center;gap:6px;min-width:0;height:24px;padding:0 5px;border-radius:var(--gp-radius-s);cursor:pointer;user-select:none;color:inherit;background:transparent;transition:background .12s var(--gp-ease)}
+.gp-section-head-graph{height:32px;padding:0 6px 0 4px;border-top:.5px solid var(--gp-hairline);border-bottom:.5px solid var(--gp-hairline);gap:2px}
+.gp-section-toggle{display:flex;align-items:center;gap:6px;min-width:0;height:24px;padding:0 6px;border-radius:var(--gp-radius-s);cursor:pointer;user-select:none;color:inherit;background:transparent;transition:background .12s var(--gp-ease)}
 .gp-section-toggle:hover{background:var(--gp-hover)}
 .gp-section-toggle:focus-visible{outline:none;box-shadow:var(--gp-ring)}
-.gp-section-title{font-size:10.5px;font-weight:650;letter-spacing:.045em;text-transform:uppercase;color:var(--gp-label-3);white-space:nowrap}
-.gp-section-count{min-width:17px;height:15px;padding:0 5px;border-radius:999px;background:var(--gp-hover);color:var(--gp-label-3);font-size:10px;font-weight:600;line-height:15px;text-align:center;font-variant-numeric:tabular-nums}
-.gp-chevron{width:11px;height:11px;flex:none;color:var(--gp-label-3);transition:transform .2s var(--gp-ease)}
+.gp-section-title{font-size:11px;font-weight:600;letter-spacing:.045em;text-transform:uppercase;color:var(--gp-label-3);white-space:nowrap}
+.gp-section-count{min-width:17px;height:17px;padding:0 5px;border-radius:999px;background:color-mix(in srgb,var(--gp-label) 8%,transparent);color:var(--gp-label-3);font-size:10px;font-weight:600;line-height:17px;text-align:center;font-variant-numeric:tabular-nums}
+.gp-chevron{width:13px;height:13px;flex:none;color:var(--gp-label-3);transition:transform .2s var(--gp-ease)}
 .gp-chevron.open{transform:rotate(90deg)}
-.gp-section-actions{position:relative;margin-left:auto;display:flex;align-items:center;gap:1px;flex:none}
+.gp-section-actions{position:relative;margin-left:auto;display:flex;align-items:center;gap:3px;flex:none}
 /* The branch popover belongs to the header's action cluster, not to the chip:
    anchored to the chip it would hang off the panel's left edge. */
 .gp-section-actions .gp-menu-wrap{position:static}
@@ -533,7 +650,7 @@ body:not([data-ds-dark-theme]) .gp-root{
 .gp-progress-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gp-progress-time{margin-left:auto;flex:none;font-family:var(--gp-mono);font-size:10px;font-variant-numeric:tabular-nums;color:var(--gp-label-3)}
 
-.gp-row{display:flex;align-items:center;gap:8px;height:32px;margin:0 6px;padding:0 6px 0 8px;border-radius:7px;cursor:pointer;position:relative;transition:background .12s var(--gp-ease)}
+.gp-row{display:flex;align-items:center;gap:6px;height:28px;margin:0 4px;padding:0 6px 0 8px;border-radius:6px;cursor:pointer;position:relative;transition:background .12s var(--gp-ease)}
 .gp-row:hover{background:var(--gp-hover)}
 .gp-row:active{background:var(--gp-press)}
 .gp-row:focus-visible{outline:none;box-shadow:var(--gp-ring)}
@@ -542,7 +659,7 @@ body:not([data-ds-dark-theme]) .gp-root{
 .gp-row-conflict .gp-name{color:var(--gp-red)}
 /* A deleted path reads struck through, as in the Source Control view. */
 .gp-row-deleted .gp-name{text-decoration:line-through;text-decoration-thickness:1px;text-decoration-color:color-mix(in srgb,var(--gp-label-3) 78%,transparent)}
-.gp-counts{display:flex;gap:6px;flex:none;font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--gp-label-3);font-family:var(--gp-mono)}
+.gp-counts{display:flex;gap:5px;flex:none;font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--gp-label-3);font-family:var(--gp-mono)}
 .gp-add{color:var(--gp-green)}
 .gp-del{color:var(--gp-red)}
 .gp-row-actions{display:none;align-items:center;gap:1px;flex:none}
@@ -553,7 +670,7 @@ body:not([data-ds-dark-theme]) .gp-root{
 /* --- change badges -------------------------------------------------------- */
 /* One coloured letter, right-aligned, no pill: the Source Control vocabulary.
    Hover swaps it for the row actions, so it never competes with them. */
-.gp-change{flex:none;display:inline-flex;align-items:center;justify-content:center;width:13px;height:18px;font:600 11px/1 var(--gp-font);font-variant-numeric:tabular-nums;user-select:none;color:var(--gp-label-3)}
+.gp-change{flex:none;display:inline-flex;align-items:center;justify-content:center;width:12px;height:16px;font:600 10.5px/1 var(--gp-font);font-variant-numeric:tabular-nums;user-select:none;color:var(--gp-label-3)}
 .gp-change.M,.gp-change.T{color:var(--gp-scm-modified)}
 .gp-change.A,.gp-change.C{color:var(--gp-scm-added)}
 .gp-change.U,.gp-change.R{color:var(--gp-scm-untracked)}
@@ -561,16 +678,16 @@ body:not([data-ds-dark-theme]) .gp-root{
 .gp-change.CONFLICT{color:var(--gp-scm-conflict);font-weight:700}
 
 /* --- file type icons ------------------------------------------------------ */
-.gp-ftype{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;color:var(--gp-label-4)}
-.gp-ftype svg{width:16px;height:16px;flex:none;display:block}
+.gp-ftype{flex:none;display:inline-flex;align-items:center;justify-content:center;width:15px;color:var(--gp-label-4)}
+.gp-ftype svg{width:15px;height:15px;flex:none;display:block}
 
 /* --- buttons -------------------------------------------------------------- */
-.gp-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:24px;min-width:24px;padding:0 5px;border-radius:var(--gp-radius-s);border:none;background:transparent;color:var(--gp-label-3);font:inherit;font-size:11.5px;cursor:pointer;transition:background .12s var(--gp-ease),color .12s var(--gp-ease)}
+.gp-btn{display:inline-flex;align-items:center;justify-content:center;gap:4px;height:24px;min-width:24px;padding:0 5px;border-radius:5px;border:none;background:transparent;color:var(--gp-label-3);font:inherit;font-size:11px;cursor:pointer;transition:background .12s var(--gp-ease),color .12s var(--gp-ease)}
 .gp-btn:hover:not(:disabled){background:var(--gp-hover);color:var(--gp-label)}
 .gp-btn:active:not(:disabled){background:var(--gp-press)}
 .gp-btn:focus-visible{outline:none;box-shadow:var(--gp-ring)}
 .gp-btn:disabled{opacity:.36;cursor:default}
-.gp-btn svg{width:13px;height:13px;flex:none}
+.gp-btn svg{width:15px;height:15px;flex:none}
 .gp-btn.active{background:var(--gp-accent-soft);color:var(--gp-accent)}
 .gp-btn-danger:hover:not(:disabled){background:color-mix(in srgb,var(--gp-red) 16%,transparent);color:var(--gp-red)}
 /* A running verb keeps its place in the header: the glyph becomes a spinner and
@@ -578,7 +695,7 @@ body:not([data-ds-dark-theme]) .gp-root{
 .gp-btn-busy,.gp-btn-busy:disabled{color:var(--gp-accent);opacity:1;cursor:progress}
 .gp-btn-busy:hover:not(:disabled){background:transparent}
 
-.gp-primary{height:30px;padding:0 12px;border-radius:8px;border:none;background:var(--gp-accent);color:var(--gp-accent-ink);font:inherit;font-size:12.5px;font-weight:600;letter-spacing:-.01em;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:background .12s var(--gp-ease),transform .08s var(--gp-ease)}
+.gp-primary{height:28px;padding:0 12px;border-radius:6px;border:none;background:var(--gp-accent);color:var(--gp-accent-ink);font:inherit;font-size:12px;font-weight:560;letter-spacing:-.01em;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:background .12s var(--gp-ease),transform .08s var(--gp-ease)}
 .gp-primary:hover:not(:disabled){background:var(--gp-accent-hover)}
 .gp-primary:active:not(:disabled){transform:scale(.99)}
 .gp-primary:focus-visible{outline:none;box-shadow:var(--gp-ring),0 0 0 1px var(--gp-bg)}
@@ -586,8 +703,8 @@ body:not([data-ds-dark-theme]) .gp-root{
 .gp-primary svg{width:14px;height:14px;flex:none}
 
 /* --- commit box ----------------------------------------------------------- */
-.gp-compose{flex:none;display:flex;flex-direction:column;gap:8px;padding:12px 12px 10px;border-bottom:.5px solid var(--gp-hairline)}
-.gp-input{box-sizing:border-box;width:100%;min-height:38px;max-height:140px;resize:none;field-sizing:content;padding:9px 10px;border-radius:10px;border:.5px solid var(--gp-hairline);background:color-mix(in srgb,var(--gp-label) 4%,transparent);color:var(--gp-label);font:inherit;font-size:12.5px;line-height:1.45;outline:none;transition:border-color .12s var(--gp-ease),box-shadow .12s var(--gp-ease),background .12s var(--gp-ease)}
+.gp-compose{flex:none;display:flex;flex-direction:column;gap:6px;padding:10px 12px 8px;border-bottom:.5px solid var(--gp-hairline)}
+.gp-input{box-sizing:border-box;width:100%;min-height:34px;max-height:140px;resize:none;field-sizing:content;padding:8px 10px;border-radius:8px;border:.5px solid var(--gp-hairline);background:color-mix(in srgb,var(--gp-label) 4%,transparent);color:var(--gp-label);font:inherit;font-size:12.5px;line-height:1.45;outline:none;transition:border-color .12s var(--gp-ease),box-shadow .12s var(--gp-ease),background .12s var(--gp-ease)}
 .gp-input::placeholder{color:var(--gp-label-4)}
 .gp-input:hover{border-color:var(--gp-separator)}
 .gp-input:focus{border-color:color-mix(in srgb,var(--gp-accent) 60%,transparent);box-shadow:var(--gp-ring);background:color-mix(in srgb,var(--gp-label) 7%,transparent)}
@@ -604,12 +721,12 @@ body:not([data-ds-dark-theme]) .gp-root{
 
 /* --- branch chip + popover menu ------------------------------------------- */
 .gp-menu-wrap{position:relative;display:inline-flex;min-width:0}
-.gp-branch{display:inline-flex;align-items:center;gap:5px;min-width:0;max-width:132px;height:24px;padding:0 8px;border-radius:7px;background:var(--gp-hover);border:.5px solid var(--gp-hairline);color:var(--gp-label);font-family:var(--gp-mono);font-size:11px;letter-spacing:0;cursor:pointer;transition:background .12s var(--gp-ease),border-color .12s var(--gp-ease)}
+.gp-branch{display:inline-flex;align-items:center;gap:5px;min-width:0;max-width:140px;height:24px;padding:0 8px;border-radius:6px;background:transparent;border:.5px solid var(--gp-hairline);color:var(--gp-label-2);font-family:var(--gp-mono);font-size:11px;letter-spacing:0;cursor:pointer;transition:background .12s var(--gp-ease),border-color .12s var(--gp-ease)}
 .gp-branch:hover{background:var(--gp-press)}
 .gp-branch:focus-visible{outline:none;box-shadow:var(--gp-ring)}
-.gp-branch svg{width:11px;height:11px;flex:none;color:var(--gp-label-3)}
+.gp-branch svg{width:13px;height:13px;flex:none;color:var(--gp-label-3)}
 .gp-branch-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gp-branch-meta{display:flex;gap:3px;flex:none;font-size:9.5px;color:var(--gp-label-3);font-variant-numeric:tabular-nums}
+.gp-branch-meta{display:flex;gap:3px;flex:none;font-size:10px;color:var(--gp-label-3);font-variant-numeric:tabular-nums}
 .gp-branch-meta .up{color:var(--gp-green)}
 .gp-branch-meta .down{color:var(--gp-orange)}
 .gp-branch-waiting{cursor:default;color:var(--gp-label-3)}
@@ -632,28 +749,32 @@ body:not([data-ds-dark-theme]) .gp-root{
 .gp-resizer:after{content:"";position:absolute;left:50%;top:50%;width:38px;height:3px;margin:-1.5px 0 0 -19px;border-radius:2px;background:var(--gp-separator);opacity:0;transition:opacity .15s var(--gp-ease)}
 .gp-resizer:hover:after,.gp-resizer:active:after{opacity:1}
 .gp-graph-panel{flex:none;display:flex;flex-direction:column;min-height:0;position:relative;overflow:visible}
-.gp-graph-list{flex:1;min-height:0;padding:2px 0 6px}
+.gp-graph-list{flex:1;min-height:0;padding:2px 0 4px}
 .gp-graph{position:relative}
-.gp-graph-row{display:flex;align-items:center;gap:8px;min-height:38px;margin:0 6px;padding:0 8px 0 2px;border-radius:8px;cursor:pointer;position:relative;transition:background .12s var(--gp-ease)}
+.gp-graph-row{display:flex;align-items:center;gap:6px;min-height:36px;margin:0 4px;padding:0 6px;border-radius:6px;cursor:pointer;position:relative;transition:background .12s var(--gp-ease)}
 .gp-graph-row:hover{background:var(--gp-hover)}
 .gp-graph-row:focus-visible{outline:none;box-shadow:var(--gp-ring)}
 .gp-graph-row.selected{background:var(--gp-accent-soft);box-shadow:inset 2px 0 0 var(--gp-accent)}
 .gp-graph-canvas{flex:none;display:block;overflow:visible;transition:filter .15s var(--gp-ease)}
-.gp-graph-row:hover .gp-graph-canvas{filter:brightness(1.12)}
-.gp-graph-row.selected .gp-graph-canvas{filter:brightness(1.2) saturate(1.05)}
-.gp-graph-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.gp-graph-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .gp-graph-subject{display:flex;align-items:center;gap:5px;min-width:0}
-.gp-graph-subject .gp-subject-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;letter-spacing:-.01em}
-.gp-ref{flex:none;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;height:17px;padding:0 6px;border-radius:999px;background:var(--gp-hover);color:var(--gp-label-2);font-size:9.5px;font-weight:600;line-height:17px;letter-spacing:.01em}
-.gp-ref.head{background:color-mix(in srgb,var(--gp-accent) 24%,transparent);color:var(--gp-accent)}
-.gp-ref.tag{background:color-mix(in srgb,var(--gp-orange) 20%,transparent);color:var(--gp-orange)}
-.gp-ref.remote{background:color-mix(in srgb,var(--gp-purple) 20%,transparent);color:var(--gp-purple)}
-.gp-graph-meta{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;white-space:nowrap;font-size:10.5px;color:var(--gp-label-4);font-variant-numeric:tabular-nums}
+.gp-graph-subject .gp-subject-text{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;line-height:18px;letter-spacing:-.006em;color:var(--gp-label-2)}
+.gp-graph-row:hover .gp-subject-text,.gp-graph-row.selected .gp-subject-text{color:var(--gp-label)}
+/* Ref badges: solid pastel chips with ink, the way Cursor paints branch
+   labels — local branch and HEAD blue, remote purple, tag amber. */
+.gp-ref{flex:none;display:inline-flex;align-items:center;gap:4px;max-width:118px;height:18px;padding:0 7px 0 6px;border-radius:9px;background:var(--gp-ref-branch);color:var(--gp-ref-ink);font-size:11px;font-weight:500;line-height:18px;letter-spacing:.004em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gp-ref svg{width:12px;height:12px;flex:none;opacity:.92}
+.gp-ref-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gp-ref.head{background:var(--gp-ref-head)}
+.gp-ref.tag{background:var(--gp-ref-tag)}
+.gp-ref.remote{background:var(--gp-ref-remote)}
+.gp-ref.stash{background:var(--gp-ref-default);color:var(--gp-ref-default-ink)}
+.gp-graph-meta{display:flex;align-items:center;gap:5px;min-width:0;overflow:hidden;white-space:nowrap;font-size:10.5px;line-height:14px;color:var(--gp-label-3);font-variant-numeric:tabular-nums}
 .gp-graph-meta > span{flex:none;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gp-graph-meta > span:not(.gp-hash){flex:0 1 auto}
-.gp-graph-meta > span + span:before{content:"·";margin-right:6px;color:var(--gp-label-4)}
-.gp-graph-meta .gp-hash{font-family:var(--gp-mono);font-size:10px;color:var(--gp-label-3);background:var(--gp-hover);border-radius:4px;padding:0 4px;line-height:15px}
-.gp-detail{margin:2px 6px 8px;padding:10px 12px;border-radius:var(--gp-radius-m);background:color-mix(in srgb,var(--gp-label) 4%,transparent);border:.5px solid var(--gp-hairline);animation:gp-fade .16s var(--gp-ease)}
+.gp-graph-meta > span + span:before{content:"·";margin-right:5px;color:var(--gp-label-4);opacity:.7}
+.gp-graph-meta .gp-hash{font-family:var(--gp-mono);font-size:10px;color:var(--gp-label-3);letter-spacing:.01em}
+.gp-detail{margin:2px 4px 8px;padding:10px 12px;border-radius:6px;background:color-mix(in srgb,var(--gp-label) 4%,transparent);border:.5px solid var(--gp-hairline);animation:gp-fade .16s var(--gp-ease)}
 .gp-detail-body{white-space:pre-wrap;word-break:break-word;font-size:11.5px;color:var(--gp-label-2);margin:6px 0 8px}
 .gp-kv{display:flex;gap:8px;font-size:11px;color:var(--gp-label-3);line-height:1.7}
 .gp-kv b{font-weight:600;color:var(--gp-label-2)}
@@ -667,10 +788,10 @@ body:not([data-ds-dark-theme]) .gp-root{
 .gp-note{padding:18px 14px;color:var(--gp-label-3);font-size:11.5px;text-align:center;line-height:1.5}
 .gp-error{margin:8px 12px 0;padding:9px 10px;border-radius:10px;background:color-mix(in srgb,var(--gp-red) 10%,transparent);border:.5px solid color-mix(in srgb,var(--gp-red) 24%,transparent);color:var(--gp-label);font-size:11.5px;display:flex;gap:8px;align-items:flex-start;animation:gp-fade .16s var(--gp-ease)}
 .gp-error-icon{flex:none;display:inline-flex;margin-top:1px;color:var(--gp-red)}
-.gp-error-icon svg{width:13px;height:13px}
+.gp-error-icon svg{width:14px;height:14px}
 .gp-error span.gp-error-text{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap}
 .gp-toast{margin:8px 12px 0;padding:8px 10px;border-radius:9px;background:var(--gp-hover);color:var(--gp-label-2);font-size:11.5px;display:flex;gap:7px;align-items:center;animation:gp-fade .16s var(--gp-ease)}
-.gp-toast svg{width:13px;height:13px;flex:none;color:var(--gp-green)}
+.gp-toast svg{width:14px;height:14px;flex:none;color:var(--gp-green)}
 
 /* --- confirm overlay ------------------------------------------------------ */
 .gp-confirm-scrim{position:absolute;inset:0;z-index:60;display:flex;align-items:flex-end;padding:10px;background:color-mix(in srgb,#000 36%,transparent);animation:gp-fade .16s var(--gp-ease)}
@@ -1870,49 +1991,123 @@ body:not([data-ds-dark-theme]) .gp-root{
 		/* Icons                                                              */
 		/* ------------------------------------------------------------------ */
 
-		const iconProps = { viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true', focusable: 'false' }
-		/** Same canvas, heavier line: the 11–14px glyphs would smear at 1.4. */
-		const glyphProps = { ...iconProps, strokeWidth: 1.75 }
+		/**
+		 * Lucide-style glyphs: one 24px canvas, 2px round stroke, so every icon in
+		 * the panel has the same optical weight at whatever size the CSS gives it.
+		 */
+		const lucideProps = {
+			viewBox: '0 0 24 24',
+			fill: 'none',
+			stroke: 'currentColor',
+			strokeWidth: 2,
+			strokeLinecap: 'round',
+			strokeLinejoin: 'round',
+			'aria-hidden': 'true',
+			focusable: 'false',
+		}
+		/** One icon on the shared 24px canvas. */
+		const lucide = (size, ...children) => h('svg', { ...lucideProps, width: size, height: size }, ...children)
 
 		const BranchIcon = (props) =>
-			h(
-				'svg',
-				{ ...iconProps, width: props?.size ?? 13, height: props?.size ?? 13 },
-				h('circle', { cx: 4.5, cy: 12, r: 1.7 }),
-				h('circle', { cx: 4.5, cy: 4, r: 1.7 }),
-				h('circle', { cx: 11.5, cy: 6.5, r: 1.7 }),
-				h('path', { d: 'M4.5 5.7v4.6' }),
-				h('path', { d: 'M11.5 8.2c0 1.7-1.4 2.2-3.4 2.5' }),
+			lucide(
+				props?.size ?? 14,
+				h('line', { x1: 6, x2: 6, y1: 3, y2: 15 }),
+				h('circle', { cx: 18, cy: 6, r: 3 }),
+				h('circle', { cx: 6, cy: 18, r: 3 }),
+				h('path', { d: 'M18 9a9 9 0 0 1-9 9' }),
 			)
 
-		const ChevronIcon = (props) => h('svg', { ...iconProps, width: 12, height: 12, className: props?.className }, h('path', { d: 'M6 3.5 10.5 8 6 12.5' }))
-		const RefreshIcon = () => h('svg', iconProps, h('path', { d: 'M13.5 8a5.5 5.5 0 1 1-1.9-4.2' }), h('path', { d: 'M13.5 2v3.2h-3.2' }))
-		/** Two arrows around a circle: fetch + pull + push, one verb. */
+		const ChevronIcon = (props) => h('svg', { ...lucideProps, width: 12, height: 12, className: props?.className }, h('path', { d: 'm9 18 6-6-6-6' }))
+		const RefreshIcon = () =>
+			lucide(
+				16,
+				h('path', { d: 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8' }),
+				h('path', { d: 'M21 3v5h-5' }),
+				h('path', { d: 'M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16' }),
+				h('path', { d: 'M8 16H3v5' }),
+			)
+		/** Two arrows in a loop: fetch + pull + push, one verb (Lucide repeat). */
 		const SyncIcon = () =>
-			h(
-				'svg',
-				glyphProps,
-				h('path', { d: 'M2.6 8a5.4 5.4 0 0 1 9.2-3.8' }),
-				h('path', { d: 'M13.4 8a5.4 5.4 0 0 1-9.2 3.8' }),
-				h('path', { d: 'M12.4 1.6v2.9H9.5' }),
-				h('path', { d: 'M3.6 14.4v-2.9h2.9' }),
+			lucide(
+				16,
+				h('path', { d: 'm17 2 4 4-4 4' }),
+				h('path', { d: 'M3 11v-1a4 4 0 0 1 4-4h14' }),
+				h('path', { d: 'm7 22-4-4 4-4' }),
+				h('path', { d: 'M21 13v1a4 4 0 0 1-4 4H3' }),
 			)
 		/** The graph's refs filter: a lane that forks. */
 		const GraphRefsIcon = () =>
-			h(
-				'svg',
-				glyphProps,
-				h('circle', { cx: 4, cy: 3.4, r: 1.5 }),
-				h('circle', { cx: 4, cy: 12.6, r: 1.5 }),
-				h('circle', { cx: 11.8, cy: 8, r: 1.5 }),
-				h('path', { d: 'M4 4.9v6.2' }),
-				h('path', { d: 'M5.3 7.1c2.5 0 3.5.4 5 1' }),
+			lucide(
+				16,
+				h('circle', { cx: 12, cy: 18, r: 3 }),
+				h('circle', { cx: 6, cy: 6, r: 3 }),
+				h('circle', { cx: 18, cy: 6, r: 3 }),
+				h('path', { d: 'M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9' }),
+				h('path', { d: 'M12 12v3' }),
 			)
-		const PlusIcon = () => h('svg', iconProps, h('path', { d: 'M8 3v10M3 8h10' }))
-		const MinusIcon = () => h('svg', iconProps, h('path', { d: 'M3 8h10' }))
-		const UndoIcon = () => h('svg', iconProps, h('path', { d: 'M3 8a5 5 0 1 1 1.6 3.7' }), h('path', { d: 'M3 3.6V8h4.4' }))
-		const DiffIcon = () => h('svg', iconProps, h('path', { d: 'M4 2.5v6' }), h('path', { d: 'M2 5.5h4' }), h('path', { d: 'M10 10.5h4' }), h('path', { d: 'M2.5 13.5h11' }))
-		const FileIcon = () => h('svg', iconProps, h('path', { d: 'M9 1.8H4.4a1 1 0 0 0-1 1v10.4a1 1 0 0 0 1 1h7.2a1 1 0 0 0 1-1V5.3z' }), h('path', { d: 'M9 1.8v3.5h3.6' }))
+		const PlusIcon = () => lucide(16, h('path', { d: 'M5 12h14' }), h('path', { d: 'M12 5v14' }))
+		const MinusIcon = () => lucide(16, h('path', { d: 'M5 12h14' }))
+		const UndoIcon = () => lucide(16, h('path', { d: 'M9 14 4 9l5-5' }), h('path', { d: 'M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11' }))
+		const DiffIcon = () => lucide(16, h('path', { d: 'M12 3v14' }), h('path', { d: 'M5 10h14' }), h('path', { d: 'M5 21h14' }))
+		const FileIcon = () =>
+			lucide(
+				16,
+				h('path', { d: 'M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z' }),
+				h('path', { d: 'M14 2v4a2 2 0 0 0 2 2h4' }),
+			)
+		const TrashIcon = () =>
+			lucide(
+				16,
+				h('path', { d: 'M3 6h18' }),
+				h('path', { d: 'M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6' }),
+				h('path', { d: 'M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2' }),
+				h('line', { x1: 10, x2: 10, y1: 11, y2: 17 }),
+				h('line', { x1: 14, x2: 14, y1: 11, y2: 17 }),
+			)
+		const CloudIcon = () => lucide(16, h('path', { d: 'M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z' }))
+		/** The checked-out ref: a target, the glyph Cursor puts on HEAD's label. */
+		const TargetIcon = () => lucide(16, h('circle', { cx: 12, cy: 12, r: 10 }), h('circle', { cx: 12, cy: 12, r: 1 }))
+		const TagIcon = () =>
+			lucide(
+				16,
+				h('path', { d: 'M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z' }),
+				h('circle', { cx: 7.5, cy: 7.5, r: 0.5, fill: 'currentColor' }),
+			)
+		const CaretIcon = () => lucide(12, h('path', { d: 'M20 6 9 17l-5-5' }))
+		const CopyIcon = () =>
+			lucide(
+				16,
+				h('rect', { width: 14, height: 14, x: 8, y: 8, rx: 2, ry: 2 }),
+				h('path', { d: 'M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2' }),
+			)
+		const CheckIcon = () => lucide(16, h('path', { d: 'M20 6 9 17l-5-5' }))
+		/** A ringed check: the clean work tree state, not a transient toast. */
+		const SuccessIcon = () => lucide(28, h('circle', { cx: 12, cy: 12, r: 10 }), h('path', { d: 'm9 12 2 2 4-4' }))
+		const ImageIcon = () =>
+			lucide(
+				16,
+				h('rect', { width: 18, height: 18, x: 3, y: 3, rx: 2, ry: 2 }),
+				h('circle', { cx: 9, cy: 9, r: 2 }),
+				h('path', { d: 'm21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21' }),
+			)
+		/** Route-error marker; a Lucide warning triangle. */
+		const ChangeConflictIcon = () =>
+			lucide(
+				16,
+				h('path', { d: 'm21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z' }),
+				h('path', { d: 'M12 9v4' }),
+				h('path', { d: 'M12 17h.01' }),
+			)
+		const ChatIcon = () => lucide(16, h('path', { d: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' }))
+		const SparkleIcon = () =>
+			lucide(
+				16,
+				h('path', { d: 'M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z' }),
+				h('path', { d: 'M20 3v4' }),
+				h('path', { d: 'M22 5h-4' }),
+				h('path', { d: 'M4 17v2' }),
+				h('path', { d: 'M5 18H3' }),
+			)
 
 		/**
 		 * Which icon a path gets.
@@ -2013,26 +2208,6 @@ body:not([data-ds-dark-theme]) .gp-root{
 			const letter = kind === 'CONFLICT' ? '!' : kind
 			return h('span', { className: `gp-change ${kind}`, title: label, role: 'img', 'aria-label': label }, letter)
 		}
-
-		const TrashIcon = () => h('svg', iconProps, h('path', { d: 'M2.8 4.4h10.4' }), h('path', { d: 'M6.4 4.4V3.2a1 1 0 0 1 1-1h1.2a1 1 0 0 1 1 1v1.2' }), h('path', { d: 'M4.2 4.4l.6 8.2a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8.2' }))
-		const CloudIcon = () => h('svg', iconProps, h('path', { d: 'M4.4 11.6a2.6 2.6 0 0 1-.3-5.2 3.6 3.6 0 0 1 6.9-.7 2.6 2.6 0 0 1 1 5.9z' }))
-		const CaretIcon = () => h('svg', { ...iconProps, width: 12, height: 12 }, h('path', { d: 'M4 6.5 8 10.5l4-4' }))
-		const CopyIcon = () => h('svg', iconProps, h('rect', { x: 5.5, y: 5.5, width: 8, height: 8, rx: 1.4 }), h('path', { d: 'M10.5 3.6V2.9a1 1 0 0 0-1-1H2.9a1 1 0 0 0-1 1v6.6a1 1 0 0 0 1 1h.7' }))
-		const CheckIcon = () => h('svg', iconProps, h('path', { d: 'M3 8.4 6.3 11.7 13 4.6' }))
-		const ImageIcon = () =>
-			h('svg', glyphProps, h('rect', { x: 2.4, y: 3.2, width: 11.2, height: 9.6, rx: 2 }), h('circle', { cx: 6, cy: 6.7, r: 1 }), h('path', { d: 'M3.4 11.6 6.9 8.6l2.1 1.8 2-1.7 1.6 1.4' }))
-		/** Route-error marker; the same triangle Source Control uses for conflicts. */
-		const ChangeConflictIcon = () =>
-			h('svg', glyphProps, h('path', { d: 'M8 2.6 13.6 12.6H2.4z' }), h('path', { d: 'M8 6.2v2.6' }), h('circle', { cx: 8, cy: 10.9, r: 0.6, fill: 'currentColor', stroke: 'none' }))
-		const ChatIcon = () =>
-			h('svg', iconProps, h('path', { d: 'M13.4 8.4c0 2.6-2.4 4.7-5.4 4.7-.7 0-1.4-.1-2-.3L3 13.8l1.2-2.3A4.4 4.4 0 0 1 2.6 8.4C2.6 5.8 5 3.7 8 3.7s5.4 2.1 5.4 4.7Z' }))
-		const SparkleIcon = () =>
-			h(
-				'svg',
-				iconProps,
-				h('path', { d: 'M6.6 2.2 7.9 5.5 11.2 6.8 7.9 8.1 6.6 11.4 5.3 8.1 2 6.8 5.3 5.5Z' }),
-				h('path', { d: 'M12.2 9.6l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6Z' }),
-			)
 
 		/** The guide-page glyph: the Sidebar's own artwork size contract. */
 		function GitGuideIcon(props) {
@@ -2258,7 +2433,7 @@ body:not([data-ds-dark-theme]) .gp-root{
 					},
 					h(ChevronIcon, { className: `gp-chevron${expanded ? ' open' : ''}` }),
 					h('span', { className: 'gp-section-title' }, title),
-					count === undefined ? null : h('span', { className: 'gp-section-count' }, String(count)),
+					count === undefined || count === 0 ? null : h('span', { className: 'gp-section-count' }, String(count)),
 				),
 				h('div', { className: 'gp-section-actions' }, actions),
 			)
@@ -2270,23 +2445,149 @@ body:not([data-ds-dark-theme]) .gp-root{
 		 *   `triggerClass`, `title` and `t`.
 		 * @returns {object} the trigger and, while open, its menu.
 		 */
-		/** One group of rows (staged / unstaged / untracked / conflicts). */
-		function ChangeRow({ entry, group, busy, t, onOpenDiff, onOpenFile, onStage, onUnstage, onDiscard, onQuote }) {
+		/* ------------------------------------------------------------------ */
+		/* Change row interactions                                             */
+		/* ------------------------------------------------------------------ */
+
+		/**
+		 * Inline actions one change row shows on hover, left to right.
+		 *
+		 * Cursor's Source Control row: an "open file" glyph, then the modification
+		 * verbs — discard and stage for a working-tree row, unstage for a staged
+		 * one, stage alone for a conflict (staging is how it is resolved). The
+		 * row's own click already opens the changes, so there is no separate diff
+		 * button; "quote in chat" is this product's addition and stays last.
+		 * @param {string} group - section id (`staged | worktree | untracked | conflicts`).
+		 * @param {boolean} image - whether the row opens the image previewer.
+		 * @returns {string[]} action ids.
+		 */
+		function rowActionPlan(group, image) {
+			const plan = [image === true ? 'image' : 'file']
+			if (group === 'staged') {
+				plan.push('unstage')
+			} else {
+				if (group !== 'conflicts') plan.push('discard')
+				plan.push('stage')
+			}
+			if (group === 'conflicts') plan.push('quote')
+			return plan
+		}
+
+		/**
+		 * Actions of one row's context menu, in Cursor's group order: navigation
+		 * (changes or image preview, open file), modification (stage / unstage,
+		 * discard), then the path copy. A staged row adds the working-file
+		 * comparison — that is the one view only a staged row can offer — and a
+		 * conflict keeps the quote action.
+		 * @param {string} group - section id.
+		 * @param {boolean} image - whether the row opens the image previewer.
+		 * @returns {string[]} action ids.
+		 */
+		function changeMenuPlan(group, image) {
+			const plan = [image === true ? 'image' : 'changes', 'file']
+			if (group === 'staged') {
+				plan.push('compare', 'unstage')
+			} else {
+				plan.push('stage')
+				if (group !== 'conflicts') plan.push('discard')
+			}
+			plan.push('copyPath')
+			if (group === 'conflicts') plan.push('quote')
+			return plan
+		}
+
+		/**
+		 * Buttons one section header shows on its right, left to right.
+		 *
+		 * Cursor's Source Control group carries the verbs of the list below it:
+		 * "Open Changes" first (its bulk-diff page), then discard, then stage
+		 * (untracked files are mixed into the working-tree group by default, so
+		 * one "stage all" covers both). The staged group only unstages, and the
+		 * merge group only stages — staging a conflict is how it is marked
+		 * resolved, so there is no discard there.
+		 * @param {string} group - section id (`staged | worktree | conflicts`).
+		 * @returns {string[]} action ids.
+		 */
+		function sectionActionPlan(group) {
+			if (group === 'conflicts') return ['stageMerge']
+			if (group === 'staged') return ['unstageAll']
+			if (group === 'worktree') return ['previewAll', 'discardAll', 'stageAll']
+			return []
+		}
+
+		/**
+		 * The mounted panel that owns one Session's actions.
+		 *
+		 * The context menu is contributed once, at plugin scope, but its actions
+		 * are the panel's own closures (`run`, `openDiff`, …). The panel publishes
+		 * the latest set here on every render and the contribution resolves
+		 * against it when the gesture happens, so the menu can never act on a row
+		 * that has since been replaced.
+		 * @type {Map<string, { current: object | undefined }>}
+		 */
+		const panelRuntimes = new Map()
+
+		/**
+		 * One group of rows (staged / unstaged / untracked / conflicts).
+		 *
+		 * The row is the trigger of the change context menu (right-click and
+		 * Shift+F10); its click opens the changes, and the menu offers the same
+		 * verbs plus the ones that do not fit inline.
+		 * @param {object} props - row data, the panel's actions and the menu trigger.
+		 * @returns {object} the row.
+		 */
+		function ChangeRow({ entry, group, busy, t, sessionId, useContextMenu, onOpenDiff, onOpenFile, onStage, onUnstage, onDiscard, onQuote }) {
 			const { dir, name } = splitPath(entry.path)
 			const image = previewsAsImage(entry, group)
 			const select = () => (image ? onOpenFile(entry) : onOpenDiff(entry, group))
 			const showCounts = entry.additions > 0 || entry.deletions > 0
 			const conflicted = group === 'conflicts'
 			const kind = changeKindOf(entry, group)
+			const onKeyDown = (event) => {
+				if (event.key === 'Enter') {
+					event.preventDefault()
+					select()
+				}
+			}
+			// The shared menu composes its own handlers over these, so Enter keeps
+			// opening the row while Shift+F10 (and the ContextMenu key) open the
+			// menu. A build without the menu plugin still gets a focusable row.
+			const bindings = typeof useContextMenu === 'function' ? useContextMenu() : undefined
+			const trigger =
+				bindings === undefined || typeof bindings.getTriggerProps !== 'function'
+					? { tabIndex: 0, onKeyDown }
+					: bindings.getTriggerProps({ kind: CHANGE_TARGET, value: { sessionId, path: entry.path, code: entry.code, group } }, { onKeyDown })
+			/**
+			 * One inline action, in the order the plan puts it.
+			 * @param {string} action - action id from `rowActionPlan`.
+			 * @returns {object | null} the button.
+			 */
+			const actionButton = (action) => {
+				switch (action) {
+					case 'file':
+						return h(IconButton, { key: action, label: t('row.openFile'), onClick: () => onOpenFile(entry) }, h(FileIcon, null))
+					case 'image':
+						return h(IconButton, { key: action, label: t('row.openImage'), onClick: () => onOpenFile(entry) }, h(ImageIcon, null))
+					case 'discard':
+						return h(IconButton, { key: action, label: t('row.discard'), danger: true, disabled: busy, onClick: () => onDiscard(entry, group) }, h(UndoIcon, null))
+					case 'stage':
+						return h(IconButton, { key: action, label: t('row.stage'), disabled: busy, onClick: () => onStage(entry) }, h(PlusIcon, null))
+					case 'unstage':
+						return h(IconButton, { key: action, label: t('row.unstage'), disabled: busy, onClick: () => onUnstage(entry) }, h(MinusIcon, null))
+					case 'quote':
+						return h(IconButton, { key: action, label: t('conflict.quote'), disabled: busy, onClick: () => onQuote(entry) }, h(ChatIcon, null))
+					default:
+						return null
+				}
+			}
 			return h(
 				'div',
 				{
 					className: `gp-row${conflicted ? ' gp-row-conflict' : ''}${kind === 'D' ? ' gp-row-deleted' : ''}`,
 					title: conflicted ? `${entry.path} · ${t('conflict.badge')}` : entry.path,
 					role: 'button',
-					tabIndex: 0,
+					...trigger,
 					onClick: select,
-					onKeyDown: (event) => (event.key === 'Enter' ? select() : undefined),
 				},
 				h(FileTypeIcon, { path: entry.path }),
 				h('span', { className: 'gp-name' }, dir === '' ? null : h('span', { className: 'gp-dir' }, dir), name),
@@ -2299,23 +2600,143 @@ body:not([data-ds-dark-theme]) .gp-root{
 						)
 					: null,
 				h(ChangeBadge, { entry, t, group }),
-				h(
-					'span',
-					{ className: 'gp-row-actions' },
-					conflicted
-						? h(IconButton, { label: t('conflict.quote'), disabled: busy, onClick: () => onQuote(entry) }, h(ChatIcon, null))
-						: group === 'staged'
-							? h(IconButton, { label: t('row.unstage'), disabled: busy, onClick: () => onUnstage(entry) }, h(MinusIcon, null))
-							: h(IconButton, { label: t('row.stage'), disabled: busy, onClick: () => onStage(entry) }, h(PlusIcon, null)),
-					group === 'staged' || conflicted
-						? null
-						: h(IconButton, { label: t('row.discard'), disabled: busy, danger: true, onClick: () => onDiscard(entry, group) }, h(UndoIcon, null)),
-					image
-						? h(IconButton, { label: t('row.openImage'), onClick: () => onOpenFile(entry) }, h(ImageIcon, null))
-						: h(IconButton, { label: t('row.openDiff'), onClick: () => onOpenDiff(entry, group) }, h(DiffIcon, null)),
-					image ? null : h(IconButton, { label: t('row.openFile'), onClick: () => onOpenFile(entry) }, h(FileIcon, null)),
-				),
+				h('span', { className: 'gp-row-actions' }, rowActionPlan(group, image).map(actionButton)),
 			)
+		}
+
+		/**
+		 * One row's context menu, resolved against the panel that is on screen.
+		 *
+		 * The plan decides which actions exist and in what order; the runtime
+		 * supplies the callbacks. A row whose panel unmounted between the gesture
+		 * and the resolution yields no actions rather than a menu that cannot act.
+		 * @param {object} value - captured target: `{ sessionId, path, code, group }`.
+		 * @returns {object[]} menu actions.
+		 */
+		function changeMenuActions(value) {
+			const runtime = typeof value?.sessionId === 'string' ? panelRuntimes.get(value.sessionId) : undefined
+			const panel = runtime?.current
+			if (panel === undefined || panel === null) return []
+			const group = typeof value.group === 'string' && value.group !== '' ? value.group : 'worktree'
+			const path = typeof value.path === 'string' ? value.path : ''
+			if (path === '') return []
+			const entry = { path, code: typeof value.code === 'string' ? value.code : undefined }
+			const image = previewsAsImage(entry, group)
+			const t = panel.t
+			const actions = []
+			for (const id of changeMenuPlan(group, image)) {
+				const action = { id, separatorBefore: MENU_GROUP_BREAK.has(id) }
+				switch (id) {
+					case 'changes':
+						actions.push({ ...action, label: t('menu.changes'), icon: { key: MENU_ICON_KEYS.changes }, run: () => panel.openDiff(entry, group) })
+						break
+					case 'image':
+						actions.push({ ...action, label: t('menu.image'), icon: { key: MENU_ICON_KEYS.image }, run: () => panel.openFile(entry) })
+						break
+					case 'file':
+						actions.push({ ...action, label: t('menu.file'), icon: { key: MENU_ICON_KEYS.file }, run: () => panel.openFile(entry) })
+						break
+					case 'compare':
+						// The work-tree side of a staged file: `git diff -- path` reads
+						// index against the working file, which is exactly this view.
+						actions.push({ ...action, label: t('menu.compare'), icon: { key: MENU_ICON_KEYS.compare }, run: () => panel.openDiff(entry, 'worktree') })
+						break
+					case 'stage':
+						actions.push({
+							...action,
+							label: t('menu.stage'),
+							icon: { key: MENU_ICON_KEYS.stage },
+							failureLabel: t('menu.failed.stage'),
+							run: () => panel.run('stage', { paths: [path] }),
+						})
+						break
+					case 'unstage':
+						actions.push({
+							...action,
+							label: t('menu.unstage'),
+							icon: { key: MENU_ICON_KEYS.unstage },
+							failureLabel: t('menu.failed.unstage'),
+							run: () => panel.run('unstage', { paths: [path] }),
+						})
+						break
+					case 'discard':
+						actions.push({
+							...action,
+							label: t('menu.discard'),
+							icon: { key: MENU_ICON_KEYS.discard },
+							danger: true,
+							failureLabel: t('menu.failed.discard'),
+							// Discarding asks first; the panel owns the confirmation bar.
+							run: () => panel.confirmDiscard(entry, group),
+						})
+						break
+					case 'copyPath':
+						actions.push({
+							...action,
+							label: t('menu.copyPath'),
+							icon: { key: MENU_ICON_KEYS.copyPath },
+							failureLabel: t('menu.failed.copy'),
+							run: () => panel.copyPath(path),
+						})
+						break
+					case 'quote':
+						actions.push({ ...action, label: t('menu.quote'), icon: { key: MENU_ICON_KEYS.quote }, run: () => panel.quoteConflict(entry) })
+						break
+					default:
+						break
+				}
+			}
+			return actions
+		}
+
+		/**
+		 * Look one service up without assuming the build has it.
+		 * @param {object} ctx - client root context.
+		 * @param {string} name - service name.
+		 * @returns {object | undefined} the service.
+		 */
+		function serviceOf(ctx, name) {
+			try {
+				return typeof ctx.get === 'function' ? ctx.get(name) : undefined
+			} catch {
+				return undefined
+			}
+		}
+
+		/**
+		 * Register this package's glyphs in the shared menu's icon seat.
+		 *
+		 * The seat is the context-menu plugin's; a build without it throws from
+		 * `slots.inject`, and a menu without glyphs is still a working menu, so
+		 * the failure is swallowed per icon.
+		 * @param {object} slots - the slot runtime.
+		 * @returns {Function} disposer for every registration.
+		 */
+		function registerMenuIcons(slots) {
+			const icons = {
+				[MENU_ICON_KEYS.changes]: DiffIcon,
+				[MENU_ICON_KEYS.image]: ImageIcon,
+				[MENU_ICON_KEYS.file]: FileIcon,
+				[MENU_ICON_KEYS.compare]: DiffIcon,
+				[MENU_ICON_KEYS.stage]: PlusIcon,
+				[MENU_ICON_KEYS.unstage]: MinusIcon,
+				[MENU_ICON_KEYS.discard]: UndoIcon,
+				[MENU_ICON_KEYS.copyPath]: CopyIcon,
+				[MENU_ICON_KEYS.quote]: ChatIcon,
+			}
+			const disposers = []
+			for (const [key, Icon] of Object.entries(icons)) {
+				try {
+					disposers.push(slots.inject('contextMenu.icon', () => slots.register({ name: 'contextMenu.icon', key }, Icon)))
+				} catch {}
+			}
+			return () => {
+				for (const dispose of disposers) {
+					try {
+						dispose()
+					} catch {}
+				}
+			}
 		}
 
 		/* ------------------------------------------------------------------ */
@@ -2467,10 +2888,14 @@ body:not([data-ds-dark-theme]) .gp-root{
 		function graphShapes(row, laneCount, maxWidth = GRAPH_MAX_WIDTH) {
 			const lanes = Math.max(laneCount, 1)
 			// Compress the pitch down to a legibility floor, then let the pane scroll.
+			// The pitch is global so lanes stay in one vertical grid; the *width*
+			// is per row: the text starts right after the lanes this commit draws
+			// (`tree  subject`), not after the widest row of the history.
 			const laneWidth = lanes <= 1
 				? LANE_WIDTH
 				: Math.max(LANE_MIN_WIDTH, Math.min(LANE_WIDTH, (maxWidth - GRAPH_PAD * 2) / (lanes - 1)))
-			const width = GRAPH_PAD * 2 + (lanes - 1) * laneWidth
+			const extent = Math.max(row.lane, ...row.edges.map((edge) => Math.max(edge.from, edge.to))) + 1
+			const width = GRAPH_PAD * 2 + (extent - 1) * laneWidth
 			const x = (lane) => GRAPH_PAD + lane * laneWidth
 			const center = ROW_HEIGHT / 2
 			const edges = []
@@ -2486,7 +2911,7 @@ body:not([data-ds-dark-theme]) .gp-root{
 					x0 === x1
 						? `M${x0} ${y0}L${x0} ${y1}`
 						: `M${x0} ${y0}C${x0} ${y0 + bend} ${x1} ${y1 - bend} ${x1} ${y1}`
-				edges.push({ d, color: edge.color, width: 2, opacity: 1 })
+				edges.push({ d, color: edge.color, width: 1.5, opacity: 1 })
 			}
 			if (row.arrived === true) {
 				// The half-row above the node: without it a commit whose lane it owns
@@ -2495,7 +2920,7 @@ body:not([data-ds-dark-theme]) .gp-root{
 				edges.push({
 					d: `M${cx} 0L${cx} ${center}`,
 					color: row.color ?? laneColor(row.lane),
-					width: 2,
+					width: 1.5,
 					opacity: 1,
 				})
 			}
@@ -2568,7 +2993,7 @@ body:not([data-ds-dark-theme]) .gp-root{
 							r: node.radius,
 							fill: 'var(--dsw-alias-bg-base,#1b1b1d)',
 							stroke: node.color,
-							strokeWidth: 2,
+							strokeWidth: 1.5,
 						})
 					: h('circle', {
 							key: 'node',
@@ -2577,11 +3002,11 @@ body:not([data-ds-dark-theme]) .gp-root{
 							r: node.radius,
 							fill: node.color,
 							stroke: 'var(--dsw-alias-bg-base,#1b1b1d)',
-							strokeWidth: 1.2,
-							strokeOpacity: 0.75,
+							strokeWidth: 1,
+							strokeOpacity: 0.55,
 						}),
 			)
-			if (node.merge === true) children.push(h('circle', { key: 'node-merge', cx: node.cx, cy: node.cy, r: 1.9, fill: 'var(--dsw-alias-bg-base,#1b1b1d)' }))
+			if (node.merge === true) children.push(h('circle', { key: 'node-merge', cx: node.cx, cy: node.cy, r: 1.7, fill: 'var(--dsw-alias-bg-base,#1b1b1d)' }))
 			return h(
 				'svg',
 				{
@@ -2598,9 +3023,17 @@ body:not([data-ds-dark-theme]) .gp-root{
 		/** The refs of one commit, as the small badges the graph shows. */
 		function Refs({ refs, t }) {
 			if (!Array.isArray(refs) || refs.length === 0) return null
-			return refs.map((ref) =>
-				h('span', { key: `${ref.kind}:${ref.name}`, className: `gp-ref ${ref.kind}`, title: ref.kind === 'tag' ? `${t('graph.tag')}: ${ref.name}` : ref.name }, ref.name),
-			)
+			return refs.map((ref) => {
+				// Cursor's graph view puts a codicon in front of every label: a
+				// branch for local refs, a cloud for remotes, a tag for tags.
+				const Icon = ref.kind === 'remote' ? CloudIcon : ref.kind === 'tag' ? TagIcon : ref.kind === 'head' ? TargetIcon : BranchIcon
+				return h(
+					'span',
+					{ key: `${ref.kind}:${ref.name}`, className: `gp-ref ${ref.kind}`, title: ref.kind === 'tag' ? `${t('graph.tag')}: ${ref.name}` : ref.name },
+					h(Icon, { size: 11 }),
+					h('span', { className: 'gp-ref-name' }, ref.name),
+				)
+			})
 		}
 
 		/* ------------------------------------------------------------------ */
@@ -2886,22 +3319,67 @@ body:not([data-ds-dark-theme]) .gp-root{
 				tabActions.openTab(DIFF_KIND, { params: { all: true, cwd: repo?.cwd } })
 			}, [tabActions, repo])
 
-			/** Header actions per section: staging lives with the list it acts on. */
+			/**
+			 * Header actions per section: staging lives with the list it acts on.
+			 *
+			 * The order is the plan's (Cursor's group order); each verb is
+			 * disabled from its own precondition rather than from a shared flag.
+			 * @param {string} id - section id.
+			 * @returns {object[]} the section's buttons.
+			 */
 			function sectionHeaderActions(id) {
 				if (repo === undefined) return []
-				if (id === 'staged') {
-					return [
-						h(IconButton, { key: 'unstage', label: t('changes.unstageAll'), disabled: busy, onClick: () => run('unstage', { paths: (repo.staged ?? []).map((entry) => entry.path) }) }, h(MinusIcon, null)),
-					]
+				const buttons = {
+					stageMerge: () =>
+						h(
+							IconButton,
+							{
+								key: 'stageMerge',
+								label: t('changes.stageAllMerge'),
+								disabled: busy,
+								onClick: () => run('stage', { paths: (repo.conflicts ?? []).map((entry) => entry.path) }),
+							},
+							h(PlusIcon, null),
+						),
+					unstageAll: () =>
+						h(
+							IconButton,
+							{
+								key: 'unstage',
+								label: t('changes.unstageAll'),
+								disabled: busy,
+								onClick: () => run('unstage', { paths: (repo.staged ?? []).map((entry) => entry.path) }),
+							},
+							h(MinusIcon, null),
+						),
+					previewAll: () => h(IconButton, { key: 'preview', label: t('changes.previewAll'), onClick: openAllDiff }, h(DiffIcon, null)),
+					discardAll: () =>
+						h(
+							IconButton,
+							{
+								key: 'discard',
+								label: t('changes.discardAll'),
+								danger: true,
+								disabled: busy,
+								onClick: () => setConfirming({ kind: 'discardAll' }),
+							},
+							h(UndoIcon, null),
+						),
+					stageAll: () =>
+						h(
+							IconButton,
+							{
+								key: 'stage',
+								label: t('changes.stageAll'),
+								disabled: busy || stageAllPaths(repo).length === 0,
+								onClick: () => run('stage', { paths: stageAllPaths(repo) }),
+							},
+							h(PlusIcon, null),
+						),
 				}
-				if (id === 'worktree') {
-					return [
-						h(IconButton, { key: 'stage', label: t('changes.stageAll'), disabled: busy || stageAllPaths(repo).length === 0, onClick: () => run('stage', { paths: stageAllPaths(repo) }) }, h(PlusIcon, null)),
-						h(IconButton, { key: 'discard', label: t('changes.discardAll'), danger: true, disabled: busy, onClick: () => setConfirming({ kind: 'discardAll' }) }, h(UndoIcon, null)),
-						h(IconButton, { key: 'preview', label: t('changes.previewAll'), onClick: openAllDiff }, h(DiffIcon, null)),
-					]
-				}
-				return []
+				return sectionActionPlan(id)
+					.map((action) => buttons[action]?.())
+					.filter((button) => button !== undefined && button !== null)
 			}
 
 			/** Send one conflicted file to the conversation input. */
@@ -2922,6 +3400,45 @@ body:not([data-ds-dark-theme]) .gp-root{
 				},
 				[cwd, repo, sessionId, t],
 			)
+
+			/**
+			 * Publish this panel's action set for the shared context menu.
+			 *
+			 * The menu contribution is registered once at plugin scope, but its
+			 * actions are these closures. A ref keeps them current without
+			 * re-registering on every render, and the cleanup removes only this
+			 * panel's entry.
+			 */
+			const runtimeRef = useRef(undefined)
+			runtimeRef.current = {
+				t,
+				run,
+				openDiff,
+				openFile,
+				quoteConflict,
+				confirmDiscard: (entry, group) => setConfirming({ kind: 'discardOne', path: entry.path, group, request: discardRequestFor(entry, group) }),
+				copyPath: (path) => {
+					try {
+						const write = navigator.clipboard?.writeText
+						// A page served over plain HTTP has no clipboard; saying "copied"
+						// there would be a lie, so that path reports the failure instead.
+						if (typeof write !== 'function') throw new Error(t('menu.failed.copy'))
+						Promise.resolve(write.call(navigator.clipboard, path)).then(
+							() => setNotice(t('menu.copiedPath')),
+							() => setError(new Error(t('menu.failed.copy'))),
+						)
+					} catch {
+						setError(new Error(t('menu.failed.copy')))
+					}
+				},
+			}
+			useEffect(() => {
+				if (typeof sessionId !== 'string' || sessionId === '') return undefined
+				panelRuntimes.set(sessionId, runtimeRef)
+				return () => {
+					if (panelRuntimes.get(sessionId) === runtimeRef) panelRuntimes.delete(sessionId)
+				}
+			}, [sessionId])
 
 			/** Send the whole working tree to the conversation for review. */
 			const findIssues = useCallback(() => {
@@ -3005,6 +3522,9 @@ body:not([data-ds-dark-theme]) .gp-root{
 				{ id: 'staged', title: t('changes.staged'), entries: repo?.staged ?? [] },
 				{ id: 'worktree', title: t('changes.worktree'), entries: worktreeEntries },
 			].filter((section) => section.id === 'worktree' || section.entries.length > 0)
+			/** Any change at all, conflicts included: drives the empty state. */
+			const hasChanges =
+				(repo?.conflicts?.length ?? 0) + (repo?.staged?.length ?? 0) + (repo?.changes?.length ?? 0) + (repo?.untracked?.length ?? 0) > 0
 
 			return h(
 				'div',
@@ -3033,7 +3553,10 @@ body:not([data-ds-dark-theme]) .gp-root{
 						: sections.map((section) =>
 						h(
 							'div',
-							{ className: 'gp-section', key: section.id },
+							{
+								className: `gp-section${section.id === 'worktree' && hasChanges === false ? ' gp-section-empty' : ''}`,
+								key: section.id,
+							},
 							h(SectionHeader, {
 								t,
 								title: section.title,
@@ -3045,8 +3568,14 @@ body:not([data-ds-dark-theme]) .gp-root{
 							expanded[section.id] === false
 								? null
 								: section.entries.length === 0
-									? section.id === 'worktree'
-										? h('div', { className: 'gp-note' }, t('empty.clean'))
+									? section.id === 'worktree' && hasChanges === false
+										? h(
+												'div',
+												{ className: 'gp-empty' },
+												h('span', { className: 'gp-empty-icon' }, h(SuccessIcon, null)),
+												h('span', { className: 'gp-empty-title' }, t('empty.cleanTitle')),
+												h('span', { className: 'gp-empty-hint' }, t('empty.cleanHint')),
+											)
 										: null
 									: section.entries.map((entry) =>
 										h(ChangeRow, {
@@ -3055,6 +3584,8 @@ body:not([data-ds-dark-theme]) .gp-root{
 											group: section.id,
 											busy,
 											t,
+											sessionId,
+											useContextMenu: props.useContextMenu,
 											onOpenDiff: openDiff,
 											onOpenFile: openFile,
 											onStage: (target) => run('stage', { paths: [target.path] }),
@@ -3079,11 +3610,12 @@ body:not([data-ds-dark-theme]) .gp-root{
 								setExpanded((current) => ({ ...current, review: current.review === false }))
 							}
 						},
-					}, t('review.title')),
+					}, h(ChevronIcon, { className: `gp-chevron${expanded.review !== false ? ' open' : ''}` }), t('review.title')),
 					expanded.review === false ? null : h('button', {
 						type: 'button',
 						className: 'gp-review-btn',
-						disabled: busy || (repo?.staged?.length ?? 0) + (repo?.changes?.length ?? 0) + (repo?.untracked?.length ?? 0) === 0,
+						disabled: busy || hasChanges === false,
+						title: hasChanges === false ? t('review.empty') : undefined,
 						onClick: findIssues,
 					}, h(SparkleIcon, null), t('review.find')),
 				),
@@ -3195,8 +3727,11 @@ body:not([data-ds-dark-theme]) .gp-root{
 																h(
 																	'div',
 																	{ className: 'gp-graph-subject' },
-																	h(Refs, { refs: row.commit.refs, t }),
+																	// Subject first, ref badges after: the subject
+																	// keeps one fixed indent on every row instead
+																	// of being pushed right by its labels.
 																	h('span', { className: 'gp-subject-text', title: row.commit.subject }, row.commit.subject === '' ? '(无提交说明)' : row.commit.subject),
+																	h(Refs, { refs: row.commit.refs, t }),
 																),
 																h(
 																	'div',
@@ -3935,6 +4470,45 @@ body:not([data-ds-dark-theme]) .gp-root{
 			ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'git-panel: dictionaries')
 			ctx.effect(() => installStyles(), 'git-panel: styles')
 
+			/**
+			 * The change rows' context menu.
+			 *
+			 * The shared menu service is optional: a build without it keeps the
+			 * panel and simply has no right-click menu. `inject` covers a build
+			 * where the service arrives after this plugin applied; the flag keeps a
+			 * re-injected service from registering the same contribution twice
+			 * (the registry rejects duplicates by id).
+			 */
+			let menuContributed = false
+			const contributeMenu = (service) => {
+				if (menuContributed) return
+				menuContributed = true
+				ctx.effect(
+					() =>
+						service.register({
+							id: 'git-panel.change',
+							target: CHANGE_TARGET,
+							order: 200,
+							resolve: (value) => changeMenuActions(value),
+						}),
+					'git-panel: change context menu',
+				)
+				ctx.effect(() => registerMenuIcons(ctx.slots), 'git-panel: change menu icons')
+			}
+			const contextMenus = serviceOf(ctx, 'contextMenus')
+			if (contextMenus !== undefined && typeof contextMenus.register === 'function') {
+				contributeMenu(contextMenus)
+			} else {
+				try {
+					if (typeof ctx.inject === 'function') {
+						ctx.inject(['contextMenus'], (scoped) => {
+							const service = serviceOf(scoped, 'contextMenus') ?? serviceOf(ctx, 'contextMenus')
+							if (service !== undefined && typeof service.register === 'function') contributeMenu(service)
+						})
+					}
+				} catch {}
+			}
+
 			ctx.effect(
 				() =>
 					ctx.sidebarRightTabs.register({
@@ -4411,6 +4985,13 @@ body:not([data-ds-dark-theme]) .gp-root{
 				buildReviewPrompt,
 				ChangeBadge,
 				ChangeRow,
+				CHANGE_TARGET,
+				MENU_ICON_KEYS,
+				rowActionPlan,
+				changeMenuPlan,
+				changeMenuActions,
+				sectionActionPlan,
+				panelRuntimes,
 				branchSummaryOf,
 				messages: { zh, en },
 				changeKindOf,

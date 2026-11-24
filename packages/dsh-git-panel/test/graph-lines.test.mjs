@@ -111,24 +111,24 @@ test('血统染色：车道压缩后 R 仍是它自己的颜色，而不是新�
 	assert.equal(graphShapes(rRow, laneCount).node.color, rEdge.color)
 })
 
-test('宽度策略：中等车道压进预算，密集车道保底 6px', () => {
+test('宽度策略：中等车道压进预算，密集车道保底 5px', () => {
 	const { layoutGraph, graphShapes } = loadClient()
 
-	// 12 条车道：仍在预算内（16px 间距，宽 192）
+	// 12 条车道：仍在预算内（12px 间距，宽 156）
 	const mid = [{ hash: 'M', parents: Array.from({ length: 11 }, (_v, i) => `m${i}`) }]
 	for (let i = 0; i < 11; i += 1) mid.push({ hash: `m${i}`, parents: [] })
 	const midLayout = layoutGraph(mid)
 	const midShapes = graphShapes(midLayout.rows[0], midLayout.laneCount)
 	assert.ok(midShapes.width <= 262, `中等车道应压进预算，实际 ${midShapes.width}`)
-	assert.equal(midShapes.width, 16 + (midLayout.laneCount - 1) * 16, '仍在预算内时按 16px 间距排布')
+	assert.equal(midShapes.width, 16 + (midLayout.laneCount - 1) * 12, '仍在预算内时按 12px 间距排布')
 
-	// 59 条车道：间距保底 6px，画布变宽、由面板横向滚动
+	// 59 条车道：间距保底 5px，画布变宽、由面板横向滚动
 	const wide = [{ hash: 'W', parents: Array.from({ length: 59 }, (_v, i) => `w${i}`) }]
 	for (let i = 0; i < 59; i += 1) wide.push({ hash: `w${i}`, parents: [] })
 	const wideLayout = layoutGraph(wide)
 	const wideShapes = graphShapes(wideLayout.rows[0], wideLayout.laneCount)
 	const pitch = (wideShapes.width - 16) / (wideLayout.laneCount - 1)
-	assert.ok(pitch >= 5.99, `车道间距不得低于 6px，实际 ${pitch}`)
+	assert.ok(pitch >= 4.99, `车道间距不得低于 5px，实际 ${pitch}`)
 	assert.ok(wideShapes.width > 262, '超出预算时画布变宽而不是继续压缩')
 })
 
@@ -138,10 +138,10 @@ test('路径合并：同色同宽的线合成一条 path，元素数远少于车
 	for (let i = 0; i < 20; i += 1) commits.push({ hash: `p${i}`, parents: [], subject: `p${i}` })
 	const { rows, laneCount } = layoutGraph(commits)
 
-	// 第 2 行是一条过路行：车道很多，但颜色只有 6 种
+	// 第 2 行是一条过路行：车道很多，但颜色只有 8 种
 	const shapes = graphShapes(rows[1], laneCount)
 	const groups = groupEdges(shapes.edges)
-	assert.equal(groups.length, 12, '12 色调色板 → 最多 12 条 path（本例正好每种颜色一条）')
+	assert.equal(groups.length, 8, '8 色调色板 → 最多 8 条 path（本例正好每种颜色一条）')
 	assert.ok(shapes.edges.length > groups.length, '边数应远多于合并后的 path 数')
 	const expected = new Map()
 	for (const edge of shapes.edges) {
@@ -181,7 +181,7 @@ test('密集车道：节点随车道间距收缩，不压到邻道', () => {
 	const shapes = graphShapes(rows[0], laneCount)
 	const laneWidth = (shapes.width - 16) / (laneCount - 1)
 
-	assert.ok(shapes.node.radius < 4.8, `密集时应缩小节点，实际 ${shapes.node.radius}`)
+	assert.ok(shapes.node.radius < 4, `密集时应缩小节点，实际 ${shapes.node.radius}`)
 	assert.ok(shapes.node.radius * 2 <= laneWidth + 0.01, '节点直径不得超过车道间距')
 })
 

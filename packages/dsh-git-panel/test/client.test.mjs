@@ -103,6 +103,8 @@ function loadClient() {
 
 	// Drive `apply` with the smallest context that satisfies the injections.
 	const effects = []
+	/** Menu contributions the plugin registers with the shared context menu. */
+	const menus = []
 	const ctx = {
 		locale: {
 			bind: () => (key, values) => (values === undefined ? key : key),
@@ -111,6 +113,7 @@ function loadClient() {
 		effect: (factory) => {
 			effects.push(factory())
 		},
+		inject: () => {},
 		sidebarRightTabs: {
 			register: (definition) => {
 				registered.push(definition)
@@ -123,9 +126,10 @@ function loadClient() {
 			},
 			register: (options) => options,
 		},
+		get: (name) => (name === 'contextMenus' ? { register: (input) => { menus.push(input); return () => {} } } : undefined),
 	}
 	plugin.apply(ctx)
-	return { plugin, registered, effects }
+	return { plugin, registered, effects, menus }
 }
 
 test('the client half injects the services it uses', () => {
@@ -159,6 +163,157 @@ test('apply is idempotent per effect and returns no throwing registration', () =
 	const { effects } = loadClient()
 	assert.ok(effects.length >= 4)
 	for (const value of effects) assert.ok(value === undefined || typeof value === 'function')
+})
+
+test('the change rows register one contribution in their own target family', () => {
+	const { menus, plugin } = loadClient()
+	assert.equal(menus.length, 1, 'one contribution, however many panels mount')
+	const [menu] = menus
+	assert.equal(menu.id, 'git-panel.change')
+	assert.equal(menu.target, plugin.__test.CHANGE_TARGET)
+	assert.equal(menu.target, 'gitChange')
+	assert.equal(menu.order, 200)
+	assert.equal(typeof menu.resolve, 'function')
+})
+
+test('the inline row actions follow Cursor: open file, discard, stage', () => {
+	const { plugin } = loadClient()
+	const { rowActionPlan } = plugin.__test
+	assert.deepEqual(plain(rowActionPlan('worktree', false)), ['file', 'discard', 'stage'])
+	assert.deepEqual(plain(rowActionPlan('untracked', false)), ['file', 'discard', 'stage'])
+	assert.deepEqual(plain(rowActionPlan('staged', false)), ['file', 'unstage'])
+	// Staging a conflict is how it is resolved; the quote action is ours.
+	assert.deepEqual(plain(rowActionPlan('conflicts', false)), ['file', 'stage', 'quote'])
+	// An image row has no readable patch, so it previews instead of opening changes.
+	assert.deepEqual(plain(rowActionPlan('worktree', true)), ['image', 'discard', 'stage'])
+})
+
+test('the context menu keeps Cursor groups: navigation, modification, path', () => {
+	const { plugin } = loadClient()
+	const { changeMenuPlan } = plugin.__test
+	assert.deepEqual(plain(changeMenuPlan('worktree', false)), ['changes', 'file', 'stage', 'discard', 'copyPath'])
+	assert.deepEqual(plain(changeMenuPlan('untracked', false)), ['changes', 'file', 'stage', 'discard', 'copyPath'])
+	assert.deepEqual(plain(changeMenuPlan('staged', false)), ['changes', 'file', 'compare', 'unstage', 'copyPath'])
+	assert.deepEqual(plain(changeMenuPlan('conflicts', false)), ['changes', 'file', 'stage', 'copyPath', 'quote'])
+	assert.deepEqual(plain(changeMenuPlan('worktree', true)), ['image', 'file', 'stage', 'discard', 'copyPath'])
+})
+
+test('a section header carries the verbs of the list below it, in Cursor order', () => {
+	const { plugin } = loadClient()
+	const { sectionActionPlan } = plugin.__test
+	// Preview is Cursor's "Open Changes" group action: it leads the group.
+	assert.deepEqual(plain(sectionActionPlan('worktree')), ['previewAll', 'discardAll', 'stageAll'])
+	assert.deepEqual(plain(sectionActionPlan('staged')), ['unstageAll'])
+	// A conflict is resolved by staging it; there is nothing to discard.
+	assert.deepEqual(plain(sectionActionPlan('conflicts')), ['stageMerge'])
+	assert.deepEqual(plain(sectionActionPlan('unknown')), [])
+})
+
+test('menu actions call the panel that is on screen', () => {
+	const { plugin } = loadClient()
+	const { changeMenuActions, panelRuntimes } = plugin.__test
+	const calls = []
+	const panel = {
+		t: (key) => key,
+		run: (action, payload) => calls.push(['run', action, payload]),
+		openDiff: (entry, group) => calls.push(['openDiff', entry.path, group]),
+		openFile: (entry) => calls.push(['openFile', entry.path]),
+		quoteConflict: (entry) => calls.push(['quote', entry.path]),
+		confirmDiscard: (entry, group) => calls.push(['confirmDiscard', entry.path, group]),
+		copyPath: (path) => calls.push(['copyPath', path]),
+	}
+	panelRuntimes.set('session-1', { current: panel })
+	try {
+		const actions = changeMenuActions({ sessionId: 'session-1', path: 'src/app.ts', code: ' M', group: 'worktree' })
+		assert.deepEqual(plain(actions.map((action) => action.id)), ['changes', 'file', 'stage', 'discard', 'copyPath'])
+		assert.equal(actions[0].label, 'menu.changes')
+		// The modification verbs and the path copy open new groups.
+		assert.deepEqual(plain(actions.map((action) => action.separatorBefore === true)), [false, false, true, false, true])
+		assert.equal(actions[3].danger, true, 'discarding is the destructive one')
+		actions[2].run()
+		actions[3].run()
+		assert.deepEqual(plain(calls), [
+			['run', 'stage', { paths: ['src/app.ts'] }],
+			['confirmDiscard', 'src/app.ts', 'worktree'],
+		])
+
+		// A row whose panel unmounted yields no actions, not a dead menu.
+		panelRuntimes.delete('session-1')
+		assert.deepEqual(plain(changeMenuActions({ sessionId: 'session-1', path: 'src/app.ts', group: 'worktree' })), [])
+	} finally {
+		panelRuntimes.delete('session-1')
+	}
+})
+
+test('a row composes the context-menu trigger with its own Enter', () => {
+	const { plugin } = loadClient()
+	const { ChangeRow, CHANGE_TARGET } = plugin.__test
+	const opened = []
+	const targets = []
+	const useContextMenu = () => ({
+		getTriggerProps: (target, handlers) => {
+			targets.push(target)
+			return { ...handlers, tabIndex: 0, onContextMenu: () => opened.push('menu') }
+		},
+	})
+	const row = ChangeRow({
+		entry: { path: 'src/app.ts', code: ' M', additions: 1, deletions: 0 },
+		group: 'worktree',
+		busy: false,
+		t: (key) => key,
+		sessionId: 'session-1',
+		useContextMenu,
+		onOpenDiff: (entry, group) => opened.push(`diff:${entry.path}:${group}`),
+		onOpenFile: (entry) => opened.push(`file:${entry.path}`),
+		onStage: (entry) => opened.push(`stage:${entry.path}`),
+		onUnstage: (entry) => opened.push(`unstage:${entry.path}`),
+		onDiscard: (entry, group) => opened.push(`discard:${entry.path}:${group}`),
+		onQuote: (entry) => opened.push(`quote:${entry.path}`),
+	})
+	assert.equal(row.props.tabIndex, 0)
+	assert.equal(typeof row.props.onContextMenu, 'function')
+	assert.deepEqual(JSON.parse(JSON.stringify(targets[0])), {
+		kind: CHANGE_TARGET,
+		value: { sessionId: 'session-1', path: 'src/app.ts', code: ' M', group: 'worktree' },
+	})
+	row.props.onClick()
+	row.props.onKeyDown({ key: 'Enter', preventDefault: () => {} })
+	row.props.onContextMenu()
+	assert.deepEqual(opened, ['diff:src/app.ts:worktree', 'diff:src/app.ts:worktree', 'menu'])
+
+	// Hover actions, in Cursor's order, live in the row's last cell.
+	const actions = row.children[4]
+	assert.equal(actions.props.className, 'gp-row-actions')
+	assert.deepEqual(
+		elementsOf(actions)
+			.filter((button) => button.props?.label !== undefined)
+			.map((button) => button.props.label),
+		['row.openFile', 'row.discard', 'row.stage'],
+	)
+})
+
+test('a build without the shared menu still gives the row a keyboard stop', () => {
+	const { plugin } = loadClient()
+	const { ChangeRow } = plugin.__test
+	const opened = []
+	const row = ChangeRow({
+		entry: { path: 'src/app.ts', code: ' M', additions: 0, deletions: 0 },
+		group: 'staged',
+		busy: false,
+		t: (key) => key,
+		sessionId: 'session-1',
+		useContextMenu: undefined,
+		onOpenDiff: (entry, group) => opened.push(`diff:${entry.path}:${group}`),
+		onOpenFile: () => {},
+		onStage: () => {},
+		onUnstage: () => {},
+		onDiscard: () => {},
+		onQuote: () => {},
+	})
+	assert.equal(row.props.tabIndex, 0)
+	assert.equal(row.props.onContextMenu, undefined)
+	row.props.onKeyDown({ key: 'Enter', preventDefault: () => {} })
+	assert.deepEqual(opened, ['diff:src/app.ts:staged'])
 })
 
 test('parsePatch tracks both line numbers and counts', () => {
@@ -370,12 +525,12 @@ test('graphShapes draws straight lanes, curved merges and a ring node', () => {
 	])
 	const row = graphShapes(flat.rows[0], flat.laneCount)
 	assert.equal(row.width, 16, 'one lane keeps the padding on both sides')
-	assert.equal(row.height, 38)
+	assert.equal(row.height, 36)
 	assert.equal(row.edges.length, 1)
-	assert.match(row.edges[0].d, /^M8 19L8 38$/, 'a lane that holds is a straight line')
+	assert.match(row.edges[0].d, /^M8 18L8 36$/, 'a lane that holds is a straight line')
 	assert.equal(row.node.cx, 8)
 	assert.equal(row.node.merge, false)
-	assert.equal(row.node.radius, 4.8, 'a plain commit draws a small node')
+	assert.equal(row.node.radius, 4, 'a plain commit draws a small node')
 
 	const merged = layoutGraph([
 		{ hash: 'm', parents: ['a', 'b'] },
@@ -387,8 +542,8 @@ test('graphShapes draws straight lanes, curved merges and a ring node', () => {
 	assert.equal(mergeRow.edges.length, 2)
 	const curved = mergeRow.edges.filter((edge) => edge.d.includes('C'))
 	assert.equal(curved.length, 1, 'the second parent bends into its own lane')
-	assert.match(curved[0].d, /^M8 19C8 [\d.]+ 24 [\d.]+ 24 38$/)
-	assert.equal(mergeRow.width, 32, 'two lanes widen the canvas by one lane width (16px)')
+	assert.match(curved[0].d, /^M8 18C8 [\d.]+ 20 [\d.]+ 20 36$/)
+	assert.equal(mergeRow.width, 28, 'two lanes widen the canvas by one lane width (12px)')
 	assert.equal(mergeRow.node.merge, true)
 	assert.ok(mergeRow.node.radius > row.node.radius, 'a merge draws a larger node')
 })
@@ -493,6 +648,17 @@ test('file icons resolve by name, longest suffix, then the generic page', () => 
  * @param {object[]} [out] - accumulator.
  * @returns {object[]} every element with `type` and `props`.
  */
+/**
+ * Strip the vm realm's prototypes so `deepStrictEqual` compares plain data:
+ * the bundle runs inside `vm.runInNewContext`, whose arrays are not this
+ * realm's arrays.
+ * @param {unknown} value - anything JSON-shaped.
+ * @returns {unknown} the same data in this realm.
+ */
+function plain(value) {
+	return JSON.parse(JSON.stringify(value))
+}
+
 function elementsOf(node, out = []) {
 	if (node === null || node === undefined) return out
 	if (Array.isArray(node)) {
@@ -561,8 +727,9 @@ test('clicking an image row opens the preview, a text row opens the diff', () =>
 	textRow.props.onClick()
 	assert.deepEqual(calls, ['diff'])
 	const textLabels = elementsOf(textRow).map((node) => node.props?.label).filter(Boolean)
-	assert.ok(textLabels.includes('row.openDiff'))
-	assert.ok(textLabels.includes('row.openFile'))
+	// Cursor's row: the click is the diff, so the inline actions are open file,
+	// discard and stage — no separate diff button.
+	assert.deepEqual(textLabels, ['row.openFile', 'row.discard', 'row.stage'])
 })
 
 test('the loading skeleton gives React style objects, not strings', () => {
