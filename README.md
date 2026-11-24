@@ -12,7 +12,8 @@
 | `dsh-command-rea` | 斜杠命令 `/rea`：把逆向分析请求交给 `reverse-engineer-anything` 技能与 REA MCP，附带钉死 DSH 版本的菜单面孔补丁 | 1 条 bundle |
 | `dsh-cursor-bridge` | 把项目里的 `.cursor/skills`、`.cursor/commands` 投影成 DSH 技能，直接进「/」菜单 | 1 条 bundle |
 | `@qzsy/dsh-git-panel` | 右侧栏 Git 分区：改动分组、提交框、暂存/丢弃、改动预览标签页、提交分支图（按本机 Cursor 的 Git 模块对齐） | 1 条 bundle |
-| `dsh-restart-button` | 账号（头像）行右端的「⏻ 重启」：两段式确认、自动等进程回来并刷新；宿主侧从 cgroup 认 systemd 单元。桌面侧栏与手机抽屉同源 | 1 条 bundle |
+| `dsh-restart-button` | 账号（头像）行右端的「⏻ 重启」：点击弹确认框，确认后弹窗内显示重启进度，自动等进程回来并刷新；点击不会触发个人中心。宿主侧从 cgroup 认 systemd 单元。桌面侧栏与手机抽屉同源 | 1 条 bundle |
+| `dsh-update-button` | 重启按钮右边的「⭡ 更新」：点击弹窗显示版本对比与阶段进度；查 npm 新版本 → 停服务 → 全局装新版本 → 回读版本校验 → 起服务 → HTTP 健康探测；失败自动回滚并给日志/重试。真正的执行者是 `systemd-run` 瞬态单元里的脚本，不在服务 cgroup 里 | 1 条 bundle |
 | `@qzsy/dsh-rewind` | Cursor 式逐轮回退：只写回这一轮被改过的文件（新建的删掉），预览可选、冲突跳过、可撤销；对话、标题、队列一行不动 | 1 条 bundle |
 | `@qzsy/dsh-artifact-index` | 会话图片产物的项目视图：回合结束时把新图硬链接进 `<项目>/.dsh/artifacts` 并维护 `index.json`，附 `/artifacts list\|backfill\|clear\|gc`，到阈值提醒清退；卸载与 gc 复用 DSH 的内容寻址对象库 | 1 条 bundle |
 

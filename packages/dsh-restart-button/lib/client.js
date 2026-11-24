@@ -70,6 +70,9 @@ window.__ModuleLoader__.load({
   transform: translateY(-50%);
   -webkit-tap-highlight-color: transparent;
 }
+/* 宿主有一条 button[aria-label="重启 DSH"] { position: relative }，特异性压过单类，
+   会把按钮顶成 relative（账号行里比「更新」高 14px）。带属性选择器压回去。 */
+.dsh-restart-inline[aria-label] { position: absolute; }
 .dsh-restart-inline:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .dsh-restart-inline:focus-visible { outline: 2px solid var(--dsw-focus-ring-color, var(--dsw-alias-brand-primary, #4d6bfe)); outline-offset: -2px; }
 .dsh-restart-inline[data-busy="true"] { color: var(--dsw-alias-label-tertiary); cursor: default; }
