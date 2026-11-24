@@ -1,0 +1,63 @@
+{
+  "name": "dsh-update-button",
+  "version": "0.2.0",
+  "description": "An update button on the right of the account row's restart button: one authenticated Host route runs a full stop → npm install → verify → start → health-check update of the global DSH install, with automatic rollback.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "scripts",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "license": "MIT",
+  "author": "curleaf",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "update",
+    "upgrade",
+    "sidebar",
+    "systemd"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CurLeaf/dsh-plugins.git",
+    "directory": "packages/dsh-update-button"
+  },
+  "homepage": "https://github.com/CurLeaf/dsh-plugins/tree/main/packages/dsh-update-button#readme",
+  "bugs": {
+    "url": "https://github.com/CurLeaf/dsh-plugins/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

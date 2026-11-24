@@ -1,0 +1,5 @@
+# Bundle layer of `dsh-update-button`: one Host/Client row. Installing the
+# package as a bundle mounts it; no manual profile patch.
+- insert:
+    - id: update-button
+      name: dsh-update-button
