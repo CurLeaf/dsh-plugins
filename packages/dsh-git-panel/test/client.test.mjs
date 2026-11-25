@@ -548,6 +548,72 @@ test('graphShapes draws straight lanes, curved merges and a ring node', () => {
 	assert.ok(mergeRow.node.radius > row.node.radius, 'a merge draws a larger node')
 })
 
+test('the graph badges name the checkout, collapse the rest, and skip remote HEADs', () => {
+	const { plugin } = loadClient()
+	// `Array.from` keeps the result on this realm: the bundle's arrays belong to the vm.
+	const summarize = (badges) => Array.from(badges, (badge) => `${badge.kind}:${badge.names.join('|')}:${badge.named}`)
+	const refs = [
+		{ kind: 'branch', name: 'feat/store-control' },
+		{ kind: 'head', name: 'master' },
+		{ kind: 'remote', name: 'origin/master' },
+		{ kind: 'remote', name: 'origin/HEAD' },
+		{ kind: 'tag', name: 'v1.0.0' },
+	]
+
+	// Default: the checkout plus the branch it tracks. Stray local branches,
+	// tags and the remote's symbolic HEAD are not badges (Cursor's `filter`).
+	assert.deepEqual(summarize(plugin.__test.graphBadges(refs, { upstream: 'origin/master' })), [
+		'head:master:true',
+		'remote:origin/master:false',
+	])
+
+	// "全部引用": every ref of the row is eligible, but still only one is named.
+	assert.deepEqual(summarize(plugin.__test.graphBadges(refs, { upstream: 'origin/master', all: true })), [
+		'head:master:true',
+		'remote:origin/master:false',
+		'branch:feat/store-control:false',
+		'tag:v1.0.0:false',
+	])
+
+	// The named badge comes first; the rest are icon-only compact pills.
+	const rendered = plugin.__test.Refs({ refs, upstream: 'origin/master', t: (key) => key })
+	assert.equal(rendered.length, 2)
+	assert.equal(rendered[0].props.className, 'gp-ref head')
+	assert.equal(rendered[0].children[2].children[0], 'master')
+	assert.equal(rendered[1].props.className, 'gp-ref remote compact')
+	assert.equal(rendered[1].children[0], null, 'one remote needs no count')
+	assert.equal(rendered[1].children[2], null, 'compact badges keep the name in the tooltip')
+
+	// A repo without an upstream keeps only the checkout on its row.
+	assert.deepEqual(summarize(plugin.__test.graphBadges([{ kind: 'head', name: 'main' }, { kind: 'remote', name: 'origin/main' }])), [
+		'head:main:true',
+	])
+	// A remote branch that is the row's only ref does carry its name, the way
+	// Cursor names `upstream/main` on the commit it points at.
+	assert.deepEqual(summarize(plugin.__test.graphBadges([{ kind: 'remote', name: 'origin/master' }], { upstream: 'origin/master' })), [
+		'remote:origin/master:true',
+	])
+	assert.equal(plugin.__test.graphBadges(undefined).length, 0)
+})
+
+test('a row with three remote refs collapses them into one counted cloud', () => {
+	const { plugin } = loadClient()
+	const refs = [
+		{ kind: 'head', name: 'main' },
+		{ kind: 'remote', name: 'origin/main' },
+		{ kind: 'remote', name: 'origin/release' },
+		{ kind: 'remote', name: 'upstream/main' },
+	]
+	const badges = plugin.__test.graphBadges(refs, { upstream: 'origin/main', all: true })
+	assert.deepEqual(
+		Array.from(badges, (badge) => `${badge.kind}:${badge.names.length}:${badge.named}`),
+		['head:1:true', 'remote:3:false'],
+	)
+	const rendered = plugin.__test.Refs({ refs, upstream: 'origin/main', all: true, t: (key) => key })
+	assert.equal(rendered[1].props.className, 'gp-ref remote compact')
+	assert.equal(rendered[1].children[0].children[0], '3')
+})
+
 test('fileAddress builds a session file address that survives spaces and drive letters', () => {
 	const { plugin } = loadClient()
 	// An absolute path rides the session scope with its leading separator kept:

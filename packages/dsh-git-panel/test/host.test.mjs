@@ -213,12 +213,38 @@ test('a commit carries the message, stages everything when asked, and shows up i
 		assert.equal(graph.commits[0].subject, 'feat: second')
 		assert.equal(graph.commits[0].body, 'body paragraph')
 		assert.deepEqual(graph.commits[0].refs, [{ kind: 'head', name: 'main' }])
+		assert.equal(graph.upstream, undefined, 'a local-only branch has no upstream to label')
 
 		const detail = await perform({ action: 'commitDetail', cwd: dir, hash: graph.commits[0].hash }, SIGNAL)
 		assert.equal(detail.commit.files.length, 2)
 		const extra = detail.commit.files.find((file) => file.path === 'extra.txt')
 		assert.equal(extra.status, 'A')
 		assert.equal(extra.additions, 1)
+	} finally {
+		await rm(dir, { recursive: true, force: true })
+	}
+})
+
+test('the graph reports the upstream the checkout tracks, and none when detached', async () => {
+	const dir = await repository()
+	const git = (...args) => execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8' })
+	try {
+		git('remote', 'add', 'origin', 'https://example.invalid/repo.git')
+		git('update-ref', 'refs/remotes/origin/main', 'HEAD')
+		git('config', 'branch.main.remote', 'origin')
+		git('config', 'branch.main.merge', 'refs/heads/main')
+
+		const graph = await perform({ action: 'graph', cwd: dir, limit: 10 }, SIGNAL)
+		assert.equal(graph.upstream, 'origin/main')
+		assert.ok(
+			graph.commits[0].refs.some((ref) => ref.kind === 'remote' && ref.name === 'origin/main'),
+			'the upstream ref is one of the commit decorations',
+		)
+
+		git('checkout', '--detach', '-q')
+		const detached = await perform({ action: 'graph', cwd: dir, limit: 10 }, SIGNAL)
+		assert.equal(detached.commits.length, 1)
+		assert.equal(detached.upstream, undefined)
 	} finally {
 		await rm(dir, { recursive: true, force: true })
 	}

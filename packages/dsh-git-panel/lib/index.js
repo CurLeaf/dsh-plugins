@@ -646,16 +646,22 @@ async function readGraph(cwd, { limit, all, signal }) {
 		`--pretty=format:${RECORD}%H${FIELD}%P${FIELD}%an${FIELD}%ae${FIELD}%at${FIELD}%D${FIELD}%s${FIELD}%b`,
 	]
 
-	const [result, remoteList] = await Promise.all([
+	const [result, remoteList, upstreamResult] = await Promise.all([
 		runGit(cwd, args, { signal, maxBuffer: 8 * 1024 * 1024 }),
 		runGit(cwd, ['remote'], { signal }),
+		// The branch the checkout tracks. The graph labels that remote next to the
+		// current branch (the way Cursor/VS Code do), so the browser needs its
+		// short name; an unborn or detached HEAD simply has none.
+		runGit(cwd, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'], { signal }),
 	])
 	const remotes = remoteList.exitCode === 0 ? remoteList.stdout.split('\n').map((line) => line.trim()).filter(Boolean) : []
+	const upstreamName = upstreamResult.exitCode === 0 ? upstreamResult.stdout.trim() : ''
+	const upstream = upstreamName === '' ? undefined : upstreamName
 	if (result.exitCode !== 0) {
 		// An unborn HEAD has no history yet; that is an empty graph, not an error.
 		const message = result.stderr.toLowerCase()
 		if (message.includes('does not have any commits') || message.includes('unknown revision') || message.includes('bad revision')) {
-			return { repo: true, root: repository.root, name: repository.name, branch: null, commits: [], truncated: false, all: all === true }
+			return { repo: true, root: repository.root, name: repository.name, branch: null, upstream, commits: [], truncated: false, all: all === true }
 		}
 		throw new PanelError('git-failed', result.stderr.trim() || 'git log failed')
 	}
@@ -666,6 +672,7 @@ async function readGraph(cwd, { limit, all, signal }) {
 		repo: true,
 		root: repository.root,
 		name: repository.name,
+		upstream,
 		commits: truncated ? commits.slice(0, depth) : commits,
 		truncated,
 		all: all === true,

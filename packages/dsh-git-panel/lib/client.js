@@ -765,6 +765,11 @@ body:not([data-ds-dark-theme]) .gp-root{
 .gp-ref{flex:none;display:inline-flex;align-items:center;gap:4px;max-width:118px;height:18px;padding:0 7px 0 6px;border-radius:9px;background:var(--gp-ref-branch);color:var(--gp-ref-ink);font-size:11px;font-weight:500;line-height:18px;letter-spacing:.004em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gp-ref svg{width:12px;height:12px;flex:none;opacity:.92}
 .gp-ref-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* A commit with several refs keeps one named badge and collapses the rest into
+   an icon (plus a count), Cursor's compact "3 clouds" form rather than three
+   separate name pills. */
+.gp-ref.compact{min-width:18px;padding:0 5px;gap:3px;justify-content:center}
+.gp-ref-count{font-size:10px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
 .gp-ref.head{background:var(--gp-ref-head)}
 .gp-ref.tag{background:var(--gp-ref-tag)}
 .gp-ref.remote{background:var(--gp-ref-remote)}
@@ -3020,18 +3025,94 @@ body:not([data-ds-dark-theme]) .gp-root{
 			)
 		}
 
+		/** Icons per ref kind, matching the codicons Cursor puts on graph badges. */
+		const REF_ICONS = { head: TargetIcon, branch: BranchIcon, remote: CloudIcon, tag: TagIcon }
+
+		/** `<remote>/HEAD` is a symbolic duplicate of one of the remote's branches. */
+		function isRemoteHead(ref) {
+			return ref.kind === 'remote' && ref.name.endsWith('/HEAD')
+		}
+
+		/**
+		 * The refs one row badges, in Cursor's order.
+		 *
+		 * Cursor's graph (VS Code's SCM graph underneath) does not name every ref
+		 * that lands on a commit. Its default filter keeps the checked-out branch
+		 * and its upstream remote, hides everything else (`scm.graph.badges =
+		 * "filter"`), and never badges a remote's symbolic `HEAD`. Each row then
+		 * names only the first of those refs and renders the rest as the compact
+		 * icon badges `graphBadges` groups, so HEAD reads `master` + `[cloud]`
+		 * instead of a row of five long pills. With `all` (the "全部引用" toggle)
+		 * every ref is eligible, still with a single named badge per row.
+		 * @param {object[]|undefined} refs - a commit's refs, from the Host.
+		 * @param {object} [options] - `upstream` short remote name (e.g.
+		 *   `origin/master`) and `all`, whether the graph shows every ref.
+		 * @returns {object[]} refs to badge, first one gets its name.
+		 */
+		function graphRefs(refs, { upstream, all } = {}) {
+			if (!Array.isArray(refs)) return []
+			const shown = refs.filter((ref) => {
+				if (isRemoteHead(ref)) return false
+				if (all === true) return true
+				return ref.kind === 'head' || (upstream !== undefined && ref.kind === 'remote' && ref.name === upstream)
+			})
+			// Cursor ranks the checkout above its upstream, then local branches,
+			// remote branches and tags; ties keep git's order.
+			const rank = (ref) => {
+				if (ref.kind === 'head') return 0
+				if (ref.kind === 'remote' && upstream !== undefined && ref.name === upstream) return 1
+				if (ref.kind === 'branch') return 2
+				if (ref.kind === 'remote') return 3
+				return 4
+			}
+			return shown.sort((left, right) => rank(left) - rank(right))
+		}
+
+		/**
+		 * The badge model of one row: one named badge, then one compact badge per
+		 * ref kind. Compact badges show the icon alone (plus a count when the kind
+		 * holds more than one ref), which is exactly how Cursor draws a commit with
+		 * several refs on it.
+		 * @param {object[]|undefined} refs - a commit's refs.
+		 * @param {object} [options] - `upstream` and `all`, see `graphRefs`.
+		 * @returns {{kind: string, names: string[], named: boolean}[]} badges.
+		 */
+		function graphBadges(refs, { upstream, all } = {}) {
+			const refs$ = graphRefs(refs, { upstream, all })
+			if (refs$.length === 0) return []
+			const badges = [{ kind: refs$[0].kind, names: [refs$[0].name], named: true }]
+			const groups = new Map()
+			for (const ref of refs$.slice(1)) {
+				const group = groups.get(ref.kind)
+				if (group === undefined) {
+					const entry = { kind: ref.kind, names: [ref.name], named: false }
+					groups.set(ref.kind, entry)
+					badges.push(entry)
+				} else {
+					group.names.push(ref.name)
+				}
+			}
+			return badges
+		}
+
 		/** The refs of one commit, as the small badges the graph shows. */
-		function Refs({ refs, t }) {
-			if (!Array.isArray(refs) || refs.length === 0) return null
-			return refs.map((ref) => {
-				// Cursor's graph view puts a codicon in front of every label: a
-				// branch for local refs, a cloud for remotes, a tag for tags.
-				const Icon = ref.kind === 'remote' ? CloudIcon : ref.kind === 'tag' ? TagIcon : ref.kind === 'head' ? TargetIcon : BranchIcon
+		function Refs({ refs, upstream, all, t }) {
+			const badges = graphBadges(refs, { upstream, all })
+			if (badges.length === 0) return null
+			return badges.map((badge) => {
+				const Icon = REF_ICONS[badge.kind] ?? BranchIcon
+				const names = badge.names
+				const title = (badge.kind === 'tag' ? names.map((name) => `${t('graph.tag')}: ${name}`) : names).join('\n')
 				return h(
 					'span',
-					{ key: `${ref.kind}:${ref.name}`, className: `gp-ref ${ref.kind}`, title: ref.kind === 'tag' ? `${t('graph.tag')}: ${ref.name}` : ref.name },
+					{
+						key: badge.named ? `${badge.kind}:${names[0]}` : `group:${badge.kind}`,
+						className: `gp-ref ${badge.kind}${badge.named ? '' : ' compact'}`,
+						title,
+					},
+					badge.named ? null : names.length > 1 ? h('span', { className: 'gp-ref-count' }, String(names.length)) : null,
 					h(Icon, { size: 11 }),
-					h('span', { className: 'gp-ref-name' }, ref.name),
+					badge.named ? h('span', { className: 'gp-ref-name' }, names[0]) : null,
 				)
 			})
 		}
@@ -3731,7 +3812,7 @@ body:not([data-ds-dark-theme]) .gp-root{
 																	// keeps one fixed indent on every row instead
 																	// of being pushed right by its labels.
 																	h('span', { className: 'gp-subject-text', title: row.commit.subject }, row.commit.subject === '' ? '(无提交说明)' : row.commit.subject),
-																	h(Refs, { refs: row.commit.refs, t }),
+																	h(Refs, { refs: row.commit.refs, upstream: graph.value?.upstream, all: graphAll, t }),
 																),
 																h(
 																	'div',
@@ -5005,6 +5086,9 @@ body:not([data-ds-dark-theme]) .gp-root{
 				FileTypeIcon,
 				fill,
 				graphShapes,
+				graphRefs,
+				graphBadges,
+				Refs,
 				groupEdges,
 				layoutGraph,
 				parsePatch,
